@@ -1,0 +1,123 @@
+from pymongo import MongoClient
+import json
+import os
+
+client = MongoClient("mongodb://username:password@your-server-address:27017/")
+db = client['twitter_database']
+tweets_collection = db['tweets']
+users_collection = db['users']
+
+# Global variables
+users_mongo = set() 
+directory = '' 
+
+for file in os.listdir(directory): # loops through all json files
+
+    path = os.path.join(directory, file) 
+	
+    with open(path, 'r') as f: # open each json file
+        for line in f: # loop through each tweet object
+            tweet_obj = json.loads(line) # creates a json object
+            if tweet_obj['delete']:
+                    continue
+            tweet_id = int(tweet_obj['id_str']) 
+            user_id = int(tweet_obj['user_id_str'])
+            if user_id not in users_mongo: # checks if user document was already created
+                users_mongo.add(user_id) 
+                #user colleection
+                user = {
+                "_id": tweet_obj['user_id_str'],
+				"verified" : tweet_obj['user_verified'],
+				"screen_name": tweet_obj['user_screen_name'],
+				"followers_count": tweet_obj['user_followers_count'],
+                "statuses_count": tweet_obj['user_statuses_count']
+				}
+                users_collection.insert_one(user) # add to mongo user collection
+            tweet_obj.pop('user', None)
+            tweet_obj.pop('verified', None)
+            tweet_obj.pop('screen_name', None)
+            tweet_obj.pop('followers_count', None)
+            tweet_obj.pop('statuses_count', None)
+            tweet_obj.pop('extended_entities', None)
+            tweet_obj.pop('quoted_status_permalink', None)
+            if not tweet_obj['in_reply_to_status_id_str']:
+                tweet_obj['root'] = True
+                tweet_obj['replied'] = False
+            else:
+                tweet_obj['root'] = False
+            
+
+
+
+                        
+def find_root_tweet(tweet):
+    reply = tweet.get('in_reply_to_status_id_str')
+    if not reply:
+        return tweet.get('_id')
+    parent = tweets_collection.find_one({'_id': reply})
+    if parent:
+        return find_root_tweet(parent)
+    return tweet.get('_id')
+
+for tweet in tweets_collection.find({'root': False}):
+	root_id = find_root_tweet(tweet)
+	root_tweet = tweets_collection.find_one({'_id': root_id, 'root': True})
+	if root_tweet:
+	    tweets_collection.update_one(
+            {'_id': root_id},
+            {'$set': {'replied': True}}
+        )
+
+# Language count
+pipeline_lang = [
+    {
+        "$facet": {
+            "group_by_language": [
+                { "$group": { "_id": "$lang", "count": { "$sum": 1 } } },
+                { "$sort": { "count": -1 } }
+            ]
+        }
+    }
+]
+
+results_lang = list(tweets_collection.aggregate(pipeline_lang))
+languages = results_lang[0]['group_by_language']
+for entry in languages:
+    print(f"Language: {entry['_id']}, Count: {entry['count']}")
+
+# Verified count	
+pipeline_verified = [
+    {
+        "$facet": {
+            "group_by_verified": [
+                { "$group": { "_id": "$user_verified", "count": { "$sum": 1 } } },
+                { "$sort": { "count": -1 } }
+            ]
+        }
+    }
+]
+
+results_verified = list(users_collection.aggregate(pipeline_verified))
+verified = results_verified[0]['group_by_verified']
+for entry in verified:
+    print(f"Verified: {entry['_id']}, Count: {entry['count']}")
+	
+# Root tweets that don't have a reply	
+pipeline_reply = [
+    {
+        "$match": { "root": True }  # Filter first
+    },
+    {
+        "$facet": {
+            "group_by_reply": [
+                { "$group": { "_id": "$replied", "count": { "$sum": 1 } } },
+                { "$sort": { "count": -1 } }
+            ]
+        }
+    }
+]
+
+results_reply = list(tweets_collection.aggregate(pipeline_reply))
+replies = results_reply[0]['group_by_reply']
+for entry in replies:
+    print(f"Reply: {entry['_id']}, Count: {entry['count']}")
