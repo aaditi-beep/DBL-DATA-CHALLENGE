@@ -1,0 +1,141 @@
+from pymongo import MongoClient
+import time 
+
+client = MongoClient("mongodb://localhost:27017")
+db = client['twitter_database']
+tweets_collection = db['tweets']
+users_collection = db['users']
+conversations_collection = db['conversations']
+
+airline_ids = set()
+
+start_time = time.time()
+
+# Creates a convo document for every root tweet
+ci = 1
+for root in tweets_collection.find({'root': True}):
+    conversation = {
+          '_id': f'c{ci}',
+          'root_tweet': root['_id'],
+          'tweets': [root['_id']],
+          'participants': [root['user_id']],
+          'airline': root['_id'] if root['id'] in airline_ids else None
+     }
+    conversations_collection.insert_one(conversation)
+    tweets_collection.update_one(
+          {'_id': root['_id']},
+          {'$addToSet': {'conversation_ids': conversation['_id']}}
+     )
+    ci += 1
+
+# Finds reply chain + root tweet
+def find_root_tweet(tweet, participants):
+    reply = tweet.get('in_reply_to_status_id_str')
+    if not reply:
+        return (tweet['_id'], participants)
+    parent = tweets_collection.find_one({'_id': reply})
+    participants = [parent['_id']] + participants
+    if parent:
+        return find_root_tweet(parent, participants)
+    return (tweet['_id'], participants)
+
+# Comparing participants list
+def same_convo(chain_1, chain_2):
+    min_len = min(len(chain_1), len(chain_2))
+
+    # Check for mismatch in the overlapping part
+    for i in range(min_len):
+        if chain_1[i] != chain_2[i]:
+            return 3  # Not the same conversation
+
+    # Case: Direct continuation (e.g. [A, B] → [A, B, C])
+    if len(chain_2) == len(chain_1) + 1:
+        return 1
+
+    # Case: Indirect continuation (e.g. [A, B] → [A, B, C, D])
+    elif len(chain_2) > len(chain_1) + 1:
+        if chain_2[:len(chain_1)] == chain_1:
+            return 2
+
+    # Case: chain_2 is a prefix of chain_1 and shorter (e.g. [A, B, C, D] ← [A, B])
+    elif len(chain_2) < len(chain_1):
+        if chain_1[:len(chain_2)] == chain_2:
+            return 4
+
+    # Case: Equal chains
+    return 0
+          
+
+# Making replies
+for tweet in tweets_collection.find({'root': False}):
+    root_id, participants = find_root_tweet(tweet)
+    root_tweet = tweets_collection.find_one({'_id': root_id, 'root': True})
+    
+    if root_tweet:
+        tweets_collection.update_one({'_id': root_id}, {'$set': {'replied': True}})
+    
+    root_conversations = list(tweets_collection.find({'root': root_id}))
+
+    for conversation in root_conversations:
+        current_type = same_convo(conversation['tweets'], participants)
+        
+        if current_type != 3:
+            if current_type == 1:
+                last_tweet = tweets_collection.find_one({'_id': participants[-1]})
+                add_user_id = last_tweet['user']  # Adjust field name as needed
+
+                conversations_collection.update_one(
+                    {'_id': conversation['_id']},
+                    {
+                        '$addToSet': {
+                            'tweets': participants[-1],
+                            'participants': add_user_id,
+                            'airline': participants[-1] if participants[-1] in airline_ids else None
+                        }
+                    }
+                )
+                break
+            elif current_type == 2:
+                for tweet_id in participants[:len(conversation['tweets'])]:
+                    last_tweet = tweets_collection.find_one({'_id': tweet_id})
+                    add_user_id = last_tweet['user']  # Adjust if your field is different
+        
+                    conversations_collection.update_one(
+                    {'_id': conversation['_id']},
+                    {
+                        '$addToSet': {
+                        'tweets': tweet_id,
+                        'participants': add_user_id,
+                        'airline': tweet_id if tweet_id in airline_ids else None
+                    }})
+                break
+            else:
+                break
+        
+        new_convo_id = f"c{ci}"
+        participants_user = []
+        for participant in participants:
+            user = tweets_collection.find_one({'_id': participant})
+            if user.get('user_id') not in participants_user:
+                participants_user.append(user.get('user_id'))
+        conversation = {
+                "_id": new_convo_id,
+                "root_tweet": root_id,
+                "tweets": [root_id] + participants,
+                "participants": [root_tweet.get('user_id')] + participants_user,
+                "airline": tweet_id if [root_id] + participants in airline_ids else None
+            }
+        conversations_collection.insert_one(conversation)
+        tweets_collection.update_one(
+                {'_id': root_id},
+                {'$addToSet': {'conversation_ids': new_convo_id}}
+            )
+        ci += 1
+
+# Cleaning conversations
+for conversation in conversations_collection.find():
+    pass
+
+
+end_time = time.time() 
+print(f'Runtime: {end_time - start_time}')
