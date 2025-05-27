@@ -1,0 +1,23 @@
+from pymongo import MongoClient
+
+client = MongoClient("")
+
+og_db = client["sentiment_analysis_full"]
+convo_db = client["sentiment_analysis_final"]
+
+og_collection = og_db["tweets"]
+convo_collection = convo_db["tweets"]
+
+field_to_copy = "sentiment"
+match_key = "_id"
+
+# Iterate through source tweets
+for doc in og_collection.find({field_to_copy: {"$exists": True}}, {match_key: 1, field_to_copy: 1}):
+    key_value = doc[match_key]
+    field_value = doc[field_to_copy]
+
+    # Update the corresponding doc in the destination collection
+    convo_collection.update_one(
+        {match_key: key_value},
+        {"$set": {field_to_copy: field_value}}
+    )
