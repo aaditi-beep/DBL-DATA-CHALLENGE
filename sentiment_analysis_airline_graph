@@ -1,0 +1,110 @@
+from pymongo import MongoClient
+import pandas as pd
+import matplotlib.pyplot as plt
+
+# Step 1: Connect to MongoDB
+client = MongoClient("mongodb://localhost:27017/")
+db = client["sentiment_analysis_full"]
+tweets = db["tweets_filtered_6"]
+
+# Step 2: Airline ID to Name Mapping (IDs as integers!)
+airline_id_map = {
+    56377143: "KLM",
+    106062176: "AirFrance",
+    18332190: "British_Airways",
+    22536055: "AmericanAir",
+    124476322: "Lufthansa",
+    26223583: "AirBerlin",
+    2182373406: "AirBerlin Assist",
+    38676903: "easyJet",
+    1542862735: "RyanAir",
+    253340062: "SingaporeAir",
+    218730857: "Qantas",
+    45621423: "EtihadAirways",
+    20626359: "VirginAtlantic"
+}
+
+airline_ids = list(airline_id_map.keys())
+
+# Step 3: Check how many matching tweets exist (debug check)
+count = tweets.count_documents({
+    "sentiment": {"$in": ["positive", "neutral", "negative"]},
+    "in_reply_to_user_id_str": {"$in": airline_ids}
+})
+print(f"Matching tweets directed to airlines: {count}")
+
+# Step 4: Aggregate sentiment counts directed at airlines
+pipeline = [
+    {
+        "$match": {
+            "sentiment": {"$in": ["positive", "neutral", "negative"]},
+            "in_reply_to_user_id_str": {"$in": airline_ids}
+        }
+    },
+    {
+        "$group": {
+            "_id": {
+                "airline_id": "$in_reply_to_user_id_str",
+                "sentiment": "$sentiment"
+            },
+            "count": {"$sum": 1}
+        }
+    }
+]
+
+results = list(tweets.aggregate(pipeline))
+
+# Step 5: Build DataFrame
+data = []
+for r in results:
+    airline_id = r["_id"]["airline_id"]
+    sentiment = r["_id"]["sentiment"]
+    count = r["count"]
+    
+    if airline_id in airline_id_map:
+        data.append({
+            "airline": airline_id_map[airline_id],
+            "sentiment": sentiment,
+            "count": count
+        })
+
+df = pd.DataFrame(data)
+# Group and summarize sentiment counts per airline
+summary = df.groupby(["airline", "sentiment"])["count"].sum().unstack(fill_value=0)
+
+# Optional: sort by total tweet volume
+summary["total"] = summary.sum(axis=1)
+summary = summary.sort_values("total", ascending=False)
+
+# Drop the total column if you only want sentiment counts
+# summary.drop(columns="total", inplace=True)
+
+# Print the table
+print("\nSentiment Counts per Airline:\n")
+print(summary)
+
+# Remove airlines with zero total tweets (optional, filters empty rows)
+df = df.groupby("airline").filter(lambda x: x["count"].sum() > 0)
+
+# Check if DataFrame is empty
+if df.empty:
+    print("No sentiment-analysed replies to airlines were found.")
+else:
+    print("\nSample of grouped data:")
+    print(df.head())
+
+    # Step 6: Pivot and plot
+    pivot_df = df.pivot(index="airline", columns="sentiment", values="count").fillna(0)
+    pivot_df["total"] = pivot_df.sum(axis=1)
+    pivot_df = pivot_df.sort_values("total", ascending=False)
+    pivot_df.drop(columns="total", inplace=True)
+
+    # Step 7: Plot
+    pivot_df.plot(kind="bar", stacked=True, figsize=(14, 7))
+    plt.title("Sentiment of Tweets Directed to Each Airline", fontsize=16, fontweight="bold")
+    plt.xlabel("Airline")
+    plt.ylabel("Number of Tweets")
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.legend(title="Sentiment")
+    plt.show()
