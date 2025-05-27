@@ -1,0 +1,208 @@
+# Imports 
+from pymongo import MongoClient
+import matplotlib.pyplot as plt
+
+# Connecting to MongoDB server 
+client = MongoClient("mongodb://localhost:27017")
+db = client['final_db'] # Change name later so we use the right db 
+tweets_collection = db['tweets']
+users_collection = db['users']
+conversations_collection = db['conversations']
+
+# Global variables 
+airline_id_map = {
+    56377143: "KLM",
+    106062176: "AirFrance",
+    18332190: "British_Airways",
+    22536055: "AmericanAir",
+    124476322: "Lufthansa",
+    26223583: "AirBerlin",
+    2182373406: "AirBerlin Assist",
+    38676903: "easyJet",
+    1542862735: "RyanAir",
+    253340062: "SingaporeAir",
+    218730857: "Qantas",
+    45621423: "EtihadAirways",
+    20626359: "VirginAtlantic"
+}
+
+# WE CAN CHANGE MILESTONE 2 PIPELINES SO WE ONLY USE ONE
+airlines = [
+    "KLM", "AirFrance", "British_Airways", "AmericanAir", "Lufthansa", "AirBerlin",
+    "AirBerlin assist", "easyJet", "RyanAir", "SingaporeAir", "Qantas",
+    "EtihadAirways", "VirginAtlantic"
+]
+
+### MILESTONE 1 ###
+
+# Language count
+pipeline_lang = [
+    {
+        "$facet": {
+            "group_by_language": [
+                { "$group": { "_id": "$lang", "count": { "$sum": 1 } } },
+                { "$sort": { "count": -1 } }
+            ]
+        }
+    }
+]
+results_lang = list(tweets_collection.aggregate(pipeline_lang))
+languages = results_lang[0]['group_by_language']
+for entry in languages:
+    print(f"Language: {entry['_id']}, Count: {entry['count']}")
+print('\n'*3)
+
+# Verified count	
+pipeline_verified = [
+    {
+        "$facet": {
+            "group_by_verified": [
+                { "$group": { "_id": "$user_verified", "count": { "$sum": 1 } } },
+                { "$sort": { "count": -1 } }
+            ]
+        }
+    }
+]
+results_verified = list(users_collection.aggregate(pipeline_verified))
+verified = results_verified[0]['group_by_verified']
+for entry in verified:
+    print(f"Verified: {entry['_id']}, Count: {entry['count']}")
+print('\n'*3)
+
+# Root tweets that don't have a reply	
+# CHECK IF THIS REALLY WORKS
+pipeline_reply = [
+    {
+        "$match": { "root": True }  # Filter first
+    },
+    {
+        "$facet": {
+            "group_by_reply": [
+                { "$group": { "_id": "$replied", "count": { "$sum": 1 } } },
+                { "$sort": { "count": -1 } }
+            ]
+        }
+    }
+]
+results_reply = list(tweets_collection.aggregate(pipeline_reply))
+replies = results_reply[0]['group_by_reply']
+for entry in replies:
+    print(f"Reply: {entry['_id']}, Count: {entry['count']}")
+print('\n'*3)
+
+### MILESTONE 2 ###
+
+# Average length of conversations 
+pipeline_avg_convo_len = [
+    {"$match": {"airline": {"$in": airlines}}},
+    {"$group": {
+        "_id": {"airline": "$airline", "conversation_id": "$conversation_id"},
+        "convo_size": {"$sum": 1}
+    }},
+    {"$group": {
+        "_id": "$_id.airline",
+        "avg_convo_length": {"$avg": "$convo_size"}
+    }}
+]
+avg_convo_lengths = list(tweets.aggregate(pipeline_avg_convo_len))
+print("Average conversation lengths per airline:", avg_convo_lengths)
+print('\n'*3)
+
+# Number of conversations per language 
+pipeline = [
+    {
+        "$lookup": {
+            "from": "tweets",
+            "localField": "root_tweet",
+            "foreignField": "_id",
+            "as": "root_info"
+        }
+    },
+    {
+        "$unwind": "$root_info"
+    },
+    {
+        "$group": {
+            "_id": "$root_info.lang",
+            "count": { "$sum": 1 }
+        }
+    },
+    {
+        "$sort": { "count": -1 }
+    }
+]
+results = list(conversations.aggregate(pipeline))
+print("Languages by conversation count:")
+for result in results:
+    print(f"{result['_id']}: {result['count']}")
+print('\n'*3)
+
+# Average number of participants per converastion 
+### ADD ###
+
+# Total number of positive, neutral, negative and unlabelled tweets graph
+labels = ["positive", "neutral", "negative", "skipped"]
+pipeline = [
+    {"$match": {"sentiment": {"$in": labels}}},
+    {"$group": {"_id": "$sentiment", "count": {"$sum": 1}}}
+]
+results = list(tweets.aggregate(pipeline))
+missing_count = tweets.count_documents({"sentiment": {"$exists": False}})
+label_names = [entry['_id'] for entry in results] + ['unlabelled']
+counts = [entry['count'] for entry in results] + [missing_count]
+label_names, counts = zip(*sorted(zip(label_names, counts)))
+plt.figure(figsize=(12, 7))
+bars = plt.bar(label_names, counts)
+plt.xlabel("Sentiment Label", fontsize=16)
+plt.ylabel("Number of Tweets", fontsize=16)
+plt.title("Sentiment Distribution in Analysed Tweets", fontweight='bold')
+plt.xticks(rotation=15)
+plt.tight_layout()
+plt.show()
+print('\n'*3)
+
+# Number of positive, neutral, negative and unlabelled tweets per airline
+count = tweets.count_documents({
+    "sentiment": {"$in": ["positive", "neutral", "negative"]},
+    "in_reply_to_user_id_str": {"$in": airline_ids}
+})
+print(f"Matching tweets directed to airlines: {count}")
+pipeline = [
+    {
+        "$match": {
+            "sentiment": {"$in": ["positive", "neutral", "negative"]},
+            "in_reply_to_user_id_str": {"$in": airline_ids}
+        }
+    },
+    {
+        "$group": {
+            "_id": {
+                "airline_id": "$in_reply_to_user_id_str",
+                "sentiment": "$sentiment"
+            },
+            "count": {"$sum": 1}
+        }
+    }
+]
+results = list(tweets.aggregate(pipeline))
+data = []
+for r in results:
+    airline_id = r["_id"]["airline_id"]
+    sentiment = r["_id"]["sentiment"]
+    count = r["count"]
+    
+    if airline_id in airline_id_map:
+        data.append({
+            "airline": airline_id_map[airline_id],
+            "sentiment": sentiment,
+            "count": count
+        })
+df = pd.DataFrame(data)
+summary = df.groupby(["airline", "sentiment"])["count"].sum().unstack(fill_value=0)
+summary["total"] = summary.sum(axis=1)
+summary = summary.sort_values("total", ascending=False)
+print("\nSentiment Counts per Airline:\n")
+print(summary)
+print('\n'*3)
+
+### MILESTONE 3 ###
