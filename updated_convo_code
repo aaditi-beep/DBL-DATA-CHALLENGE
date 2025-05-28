@@ -1,0 +1,129 @@
+from pymongo import MongoClient
+import time
+
+client = MongoClient("mongodb://localhost:27017")
+db = client['final_db']   # Your test DB here
+tweets_collection = db['tweets']
+users_collection = db['users']
+conversations_collection = db['conversations']
+
+tweets_collection.create_index('id_str')
+tweets_collection.create_index('in_reply_to_status_id_str')
+tweets_collection.create_index('root')
+tweets_collection.create_index('conversation_ids')
+conversations_collection.create_index('root_tweet')
+conversations_collection.create_index('participants')
+
+# Airline user IDs as strings
+airline_ids = {
+    "18332190", "56377143", "38676903", "218730857", "1542862735",
+    "22536055", "20626359", "253340062", "124476322", "45621423",
+    "260907612", "5920532", "13192972", "21964954", "21764143",
+    "6449282", "334032462", "821045162", "17077093", "387573617",
+    "16629918", "7212562"
+}
+ci = 1
+
+def find_root_tweet(tweet, participants):
+    reply_id = tweet['in_reply_to_status_id_str']
+    if reply_id == 'None':
+        return (tweet['_id'], participants)
+    parent = tweets_collection.find_one({'id_str': reply_id})
+    if parent:
+        return find_root_tweet(parent,  [parent['_id']] + participants)
+    return (tweet['_id'], participants)
+
+def same_convo(chain_1, chain_2):
+    min_len = min(len(chain_1), len(chain_2))
+    for i in range(min_len):
+        if chain_1[i] != chain_2[i]:
+            return 3
+    if len(chain_2) == len(chain_1) + 1:
+        return 1
+    elif len(chain_2) > len(chain_1) + 1 and chain_2[:len(chain_1)] == chain_1:
+        return 2
+    elif len(chain_2) < len(chain_1) and chain_1[:len(chain_2)] == chain_2:
+        return 4
+    return 0
+
+def add_covno(root_id, participants_chain, convo_participants):
+    airline = next((user_id for user_id in convo_participants if user_id in airline_ids), None)
+    global ci 
+    new_id = f'c{ci}'
+    conversation = {
+        '_id': new_id,
+        'root_tweet': root_id,
+        'tweets': participants_chain,
+        'participants': list(convo_participants), 
+        'airline': airline 
+    }
+    conversations_collection.insert_one(conversation)
+    tweets_collection.update_one({'_id': root_id}, {'$addToSet': {'conversation_ids': new_id}})
+    ci += 1
+
+def update_convo(convo_id, participants_chain, convo_participants):
+    airline = next((user_id for user_id in convo_participants if user_id in airline_ids), None)
+    conversations_collection.update_one(
+    {'_id': convo_id},
+    {
+        '$set': {
+            'tweets': participants_chain,
+            'participants': convo_participants,
+            'airline': airline
+        }
+    }
+    )
+
+
+start_time = time.time()
+
+# Process replies
+for tweet in tweets_collection.find({'root': False}):
+    root_id, participants_chain = find_root_tweet(tweet, [tweet['_id']])
+    root_tweet = tweets_collection.find_one({'_id': root_id, 'root': True})
+    
+    print(f'{root_id}, {participants_chain}')
+    
+    if not root_tweet:
+        continue
+
+    tweets_collection.update_one({'_id': root_id}, {'$set': {'replied': True}})
+    root_convos = list(conversations_collection.find({'root_tweet': root_id}))
+    participants_users = set(
+    doc['user_id_str'] for doc in tweets_collection.find({'_id': {'$in': participants_chain}}, {'user_id_str': 1})
+    )
+
+    if root_convos: 
+        for convo in root_convos:
+            conv_tweets = convo['tweets']
+            ctype = same_convo(conv_tweets, participants_chain)
+            if ctype == 3:
+                continue
+            elif ctype == 1 or ctype == 2:
+                update_convo(convo['_id'], participants_chain, participants_users)
+                break
+            else:
+                break
+        if ctype == 3: 
+           add_covno(root_id, participants_chain, participants_users) 
+    else:
+        add_covno(root_id, participants_chain, participants_users)
+
+
+# Delete conversations with less than 2 participants
+constraint1 = conversations_collection.delete_many({
+    '$expr': {'$lt': [{'$size': "$participants"}, 2]}
+})
+
+# Delete conversations with less than 3 tweets
+constraint2 = conversations_collection.delete_many({
+    '$expr': {'$lt': [{'$size': "$tweets"}, 3]}
+})
+
+# Delete conversations where none of the participants are airlines
+constraint3 = conversations_collection.delete_many({
+    'participants': {'$not': {'$elemMatch': {'$in': list(airline_ids)}}}
+})
+
+end_time = time.time()
+print(f"Reconstruction done in {end_time - start_time:.2f} seconds")
