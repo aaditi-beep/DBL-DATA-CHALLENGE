@@ -1,0 +1,58 @@
+from pymongo import MongoClient
+
+client = MongoClient("mongodb://localhost:27017")
+db = client['final_db']   
+tweets_collection = db['tweets']
+conversations_collection = db['conversations']
+
+for convo in conversations_collection.find():
+
+    tweets = convo['tweets']
+    sentiment_flow = []
+    positive = 0
+    neutral = 0
+    negative = 0
+    unlabeled = 0
+
+    missing = False
+
+    for tweet_id in tweets:
+        tweet = tweets_collection.find_one({'_id': tweet_id})
+
+        try: 
+            label = tweet['sentiment']
+        except (TypeError, KeyError): 
+            missing = True
+            print(f'Tweet {tweet_id} has no sentiment label')
+            break
+        sentiment_flow.append(label)
+        if label == 'positive':
+            positive += 1
+        elif label == 'neutral':
+            neutral += 1
+        elif label == 'negative':
+            negative += 1
+        else:
+            unlabeled += 1
+
+    if not missing: 
+        total = len(tweets)
+        ratios = {
+        "positive": positive / total,
+        "neutral": neutral / total,
+        "negative": negative / total,
+        "unlabeled": unlabeled / total
+        }
+        final_label = max(ratios, key=ratios.get)
+
+        conversations_collection.update_one(
+            {"_id": convo['_id']},
+            {"$set": {
+            "flow": sentiment_flow,
+            "ratio": ratios,
+            "final_label": final_label
+            }}
+            )
+        
+    else:
+        print(f"The conversation {convo['_id']} was not updated \n")
