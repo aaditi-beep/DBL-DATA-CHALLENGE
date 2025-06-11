@@ -1,0 +1,51 @@
+from pymongo import MongoClient
+from datetime import datetime
+
+client = MongoClient("mongodb://localhost:27017")
+db = client['final_db_macpro_3']   
+tweets_collection = db['tweets_final_macpro_3']
+conversations_collection = db['convos_final_macpro_4']
+
+i = 0
+for convo in conversations_collection.find():
+    last_tweet_index = convo['before_index'] 
+    tweets = convo['tweets']
+    id = convo["_id"]
+
+    root_tweet_id = convo['root_tweet']
+    try: 
+        last_tweet_id = convo['tweets'][last_tweet_index]
+    except:
+        print(f'issue in convo {id}, bi: {last_tweet_index}, {tweets}')
+        break
+
+    root_tweet_obj = tweets_collection.find_one({'_id': root_tweet_id})
+    last_tweet_obj = tweets_collection.find_one({'_id': last_tweet_id})
+
+    start_time_str = root_tweet_obj['created_at']
+    end_time_str = last_tweet_obj['created_at']
+
+    if start_time_str and end_time_str:
+        try:
+            start_time_dt = datetime.strptime(start_time_str.strip(), '%Y-%m-%d %H:%M:%S')
+            end_time_dt = datetime.strptime(end_time_str.strip(), '%Y-%m-%d %H:%M:%S')
+
+            delta = end_time_dt - start_time_dt
+
+            minutes = delta.total_seconds()/60 
+
+            conversations_collection.update_one(
+                {"_id": convo['_id']},
+                {"$set": {
+                "month": start_time_dt.strftime('%B').lower(),
+                "response_time": minutes
+                }}
+                )
+        except:
+            print({f'convo {convo["_id"]} had trouble converting, s: {start_time_str}, e: {end_time_str}'})
+    else:
+        print({f'convo {convo["_id"]} has a null, s: {start_time_str}, e: {end_time_str}'})
+
+    i += 1
+    if i % 10000 == 0:
+        print(f'{i} convos processed')
