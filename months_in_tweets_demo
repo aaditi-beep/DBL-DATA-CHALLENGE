@@ -1,0 +1,24 @@
+from pymongo import MongoClient
+from datetime import datetime
+
+client = MongoClient("mongodb://localhost:27017")
+db = client['final_db_macpro_3']   
+tweets_collection = db['tweets_final_macpro_3']
+
+for tweet in tweets_collection.find():
+    created_at_str = tweet['created_at']
+    if created_at_str:
+        try:
+            created_at_str_w = created_at_str.strip()
+            created_at_dt = datetime.strptime(created_at_str_w, '%Y-%m-%d %H:%M:%S')
+
+            tweets_collection.update_one(
+            {"_id": tweet['_id']},
+            {"$set": {
+            "month": created_at_dt.strftime('%B').lower()
+            }}
+            )
+        except:
+            print(f'tweet {tweet["_id"]} has converting issues, created_at: {created_at_str}')
+    else:
+        print(f'tweet {tweet["_id"]} has no created_at, created_at: {created_at_str}')
