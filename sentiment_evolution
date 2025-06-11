@@ -1,0 +1,141 @@
+from pymongo import MongoClient
+
+client = MongoClient("mongodb://localhost:27017")
+db = client['final_db_macpro_3']   
+tweets_collection = db['tweets_final_macpro_3']
+conversations_collection = db['convos_final_macpro_4']
+airline_ids = {
+    "18332190", "56377143", "38676903", "218730857", "1542862735",
+    "22536055", "20626359", "253340062", "124476322", "45621423",
+    "260907612", "5920532", "13192972", "21964954", "21764143",
+    "6449282", "334032462", "821045162", "17077093", "387573617",
+    "16629918", "7212562"
+}
+
+def find_before(users):
+    for index, user in enumerate(users):
+        if user in airline_ids:
+            return index
+    return None
+
+def find_after(users):
+    for i in reversed(range(len(users))):
+        if users[i] in airline_ids:
+            return i + 1  
+    return None
+
+def label_2_number(labels):
+    label_map = {
+        'positive': 1,
+        'neutral': 0,
+        'negative': -1, 
+        'unlabelled': 0
+    }
+    return [label_map[label] for label in labels if label in label_map]
+
+def categories(delta):
+    if delta < -0.1:
+        return 'negative shift'
+    elif -0.1 <= delta <= 0.1:
+        return 'stable'
+    else:
+        return 'positive shift'
+
+i = 0
+for convo in conversations_collection.find():
+
+    tweets = convo['tweets']
+    flow = convo['flow']
+    thread = convo['thread']
+    airline = convo['airline']
+
+    users = [thread[str(tweet_id)][0] for tweet_id in tweets]
+    after_index = find_after(users)
+
+    # Before score
+    if str(users[0]) == airline:
+        before_index = find_before(users[1:]) + 1
+        bnumbers = label_2_number(flow[1:before_index])
+        bscore = sum(bnumbers)/len(bnumbers) if bnumbers else 0
+    else:
+        before_index = find_before(users)
+        bnumbers = label_2_number(flow[:before_index])
+        bscore = sum(bnumbers)/len(bnumbers) if bnumbers else 0
+
+    # After score
+    anumbers = label_2_number(flow[after_index:])
+    if len(tweets) != after_index:
+        ascore = sum(anumbers)/len(anumbers) if anumbers else 0
+    else: 
+        ascore = 0
+
+    #Delta score
+    delta = ascore - bscore
+    category = categories(delta)
+
+    # Update convo doc
+    conversations_collection.update_one(
+            {"_id": convo['_id']},
+            {"$set": {
+            "before_after_score": [bscore, ascore],
+            "delta": delta,
+            "category": category,
+            "before_index": before_index
+            }}
+            )
+    
+    i += 1
+    if i % 10000 == 0:
+        print(f'{i} convos processed')
+
+
+#pipeline for verification of tweet eligiblity
+from pymongo import MongoClient
+
+client = MongoClient("mongodb://localhost:27017")
+db = client['final_db_macpro_3']
+convos_collection = db['convos_final_macpro_4']
+
+pipeline = [
+    {
+        "$match": {
+            "thread": {"$exists": True},
+            "root_tweet": {"$exists": True}
+        }
+    },
+    {
+        "$addFields": {
+            "thread_array": { "$objectToArray": "$thread" }
+        }
+    },
+    {
+        "$addFields": {
+            "root_entry": {
+                "$arrayElemAt": [
+                    {
+                        "$filter": {
+                            "input": "$thread_array",
+                            "as": "pair",
+                            "cond": {
+                                "$eq": ["$$pair.k", { "$toString": "$root_tweet" }]
+                            }
+                        }
+                    },
+                    0
+                ]
+            }
+        }
+    },
+    {
+        "$match": {
+            "root_entry.v.0": "56377143"
+        }
+    },
+    {
+        "$sample": { "size": 1 }  # Randomly select one matching conversation
+    }
+]
+
+result = list(convos_collection.aggregate(pipeline))
+print(result[0] if result else "No conversation found.")
+
