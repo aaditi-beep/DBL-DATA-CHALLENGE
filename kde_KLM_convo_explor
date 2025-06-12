@@ -1,0 +1,31 @@
+
+from pymongo import MongoClient
+import matplotlib.pyplot as plt
+import seaborn as sns  # Required for kdeplot
+
+# Connect to MongoDB
+client = MongoClient("mongodb://localhost:27017/")
+db = client["final_db_macpro_3"]
+collection = db["convos_final_macpro_4"]
+
+# Fetch delta values as float
+cursor = collection.find(
+    {"airline": "56377143", "delta": {"$exists": True, "$type": [1, 16]}},  # float = 1, int = 16
+    {"delta": 1, "_id": 0}
+)
+delta_values = [doc["delta"] for doc in cursor]
+
+# Plot density plot
+if delta_values:
+    plt.figure(figsize=(8, 6))
+    sns.kdeplot(delta_values, fill=True)
+
+    plt.title("Density Plot of Delta Scores for KLM", fontsize=16, fontweight='bold')
+    plt.xlabel("Delta Score", fontsize=14, fontweight='bold')
+    plt.ylabel("Density", fontsize=14, fontweight='bold')
+
+    plt.grid(True, linestyle='--', alpha=0.7)
+    plt.tight_layout()
+    plt.show()
+else:
+    print("No delta values found for plotting.")
