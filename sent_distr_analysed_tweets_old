@@ -1,0 +1,35 @@
+import matplotlib.pyplot as plt
+from pymongo import MongoClient
+
+# Connect to MongoDB
+client = MongoClient("mongodb://localhost:27017/")
+db = client["sentiment_analysis_full"]
+tweets = db["tweets_filtered_6"]
+
+# Get counts for labelled sentiments
+labels = ["positive", "neutral", "negative", "skipped"]
+pipeline = [
+    {"$match": {"sentiment": {"$in": labels}}},
+    {"$group": {"_id": "$sentiment", "count": {"$sum": 1}}}
+]
+results = list(tweets.aggregate(pipeline))
+
+# Get count of tweets without sentiment field
+missing_count = tweets.count_documents({"sentiment": {"$exists": False}})
+
+# Build plot data
+label_names = [entry['_id'] for entry in results] + ['unlabelled']
+counts = [entry['count'] for entry in results] + [missing_count]
+
+# Sort labels for consistent output
+label_names, counts = zip(*sorted(zip(label_names, counts)))
+
+# Plot
+plt.figure(figsize=(12, 7))
+bars = plt.bar(label_names, counts)
+plt.xlabel("Sentiment Label", fontsize=16)
+plt.ylabel("Number of Tweets", fontsize=16)
+plt.title("Sentiment Distribution in Analysed Tweets", fontweight='bold')
+plt.xticks(rotation=15)
+plt.tight_layout()
+plt.show()
