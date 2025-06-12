@@ -1,0 +1,33 @@
+from pymongo import MongoClient
+import matplotlib.pyplot as plt
+
+client = MongoClient("mongodb://localhost:27017/")  
+db = client["final_db_macpro_3"] 
+collection = db["convos_final_macpro_4"]
+
+query = {
+    "category": {"$in": ["positive shift", "stable", "negative shift"]}
+}
+
+pipeline = [
+    {"$match": query},
+    {"$group": {
+        "_id": "$category",
+        "count": {"$sum": 1}
+    }}
+]
+
+results = list(collection.aggregate(pipeline))
+
+categories = ["positive shift", "stable", "negative shift"]
+counts = {cat: 0 for cat in categories}
+for result in results:
+    counts[result["_id"]] = result["count"]
+
+plt.bar(counts.keys(), counts.values(), color=["darkorange", "darkblue", "grey"])
+
+plt.xlabel("Category", fontsize=12, fontweight='bold')
+plt.ylabel("Number of Conversations", fontsize=12, fontweight='bold')
+plt.title("Conversation Sentiment for All Airlines", fontsize=16, fontweight='bold')
+
+plt.show()
