@@ -1,0 +1,87 @@
+import matplotlib.pyplot as plt
+import seaborn as sns
+import pandas as pd
+from pymongo import MongoClient
+
+# Connect to MongoDB
+client = MongoClient("mongodb://localhost:27017")
+db = client["final_db_macpro_3"]
+collection = db["convos_final_macpro_4"]
+
+# Airline ID → Name
+airline_map = {
+    "56377143": "KLM",
+    "22536055": "AmericanAir",
+    "18332190": "British Airways",
+    "38676903": "easyJet",
+    "1542862735": "RyanAir"
+}
+
+# Aggregation: Get average response time and number of convos per airline per sentiment
+pipeline = [
+    {
+        "$match": {
+            "airline": {"$in": list(airline_map.keys())},
+            "final_label": {"$in": ["positive", "neutral", "negative"]},
+            "response_time": {"$ne": None}
+        }
+    },
+    {
+        "$group": {
+            "_id": {
+                "airline": "$airline",
+                "final_label": "$final_label"
+            },
+            "avg_response_time": {"$avg": "$response_time"},
+            "num_convos": {"$sum": 1}
+        }
+    }
+]
+
+results = list(collection.aggregate(pipeline))
+
+# Convert to DataFrame
+data = []
+for r in results:
+    sentiment = r["_id"]["final_label"]
+    airline = airline_map.get(r["_id"]["airline"], r["_id"]["airline"])
+    avg_time = r["avg_response_time"]
+    count = r["num_convos"]
+    data.append({
+        "Sentiment": sentiment,
+        "Airline": airline,
+        "AvgResponseTime": avg_time,
+        "NumConversations": count
+    })
+
+df = pd.DataFrame(data)
+
+# Order sentiments
+sentiment_order = ["negative", "neutral", "positive"]
+df["Sentiment"] = pd.Categorical(df["Sentiment"], categories=sentiment_order, ordered=True)
+
+# Plot: 3 subplots (1 row, 3 columns)
+fig, axes = plt.subplots(1, 3, figsize=(18, 6), sharey=True)
+
+for i, sentiment in enumerate(sentiment_order):
+    ax = axes[i]
+    sns.scatterplot(
+        data=df[df["Sentiment"] == sentiment],
+        x="NumConversations",
+        y="AvgResponseTime",
+        hue="Airline",
+        s=150,
+        palette="deep",
+        ax=ax
+    )
+    ax.set_title(f"{sentiment.capitalize()} Conversations", fontsize=14, fontweight='bold')
+    ax.set_xlabel("Number of Conversations", fontsize=12)
+    if i == 0:
+        ax.set_ylabel("Average Response Time (seconds)", fontsize=12)
+    else:
+        ax.set_ylabel("")
+    ax.legend().set_title("Airline")
+
+plt.suptitle("Conversation Volume vs. Response Time by Sentiment", fontsize=16, fontweight='bold')
+plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+plt.show()
