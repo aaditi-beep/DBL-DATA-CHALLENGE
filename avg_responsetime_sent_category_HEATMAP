@@ -1,0 +1,57 @@
+from pymongo import MongoClient
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+client = MongoClient("mongodb://localhost:27017")
+db = client["final_db_macpro_3"]
+collection = db["convos_final_macpro_4"]
+
+pipeline = [
+    {
+        "$match": {
+            "response_time": {"$exists": True, "$ne": None},
+            "final_label": {"$in": ["positive", "neutral", "negative"]},
+            "category": {"$in": ["positive shift", "stable", "negative shift"]}
+        }
+    },
+    {
+        "$group": {
+            "_id": {
+                "sentiment": "$final_label",
+                "category": "$category"
+            },
+            "avg_response_time": {"$avg": "$response_time"}
+        }
+    }
+]
+
+results = list(collection.aggregate(pipeline))
+
+
+# Convert to DataFrame
+data = []
+for r in results:
+    sentiment = r["_id"]["sentiment"]
+    category = r["_id"]["category"]
+    avg_time = r["avg_response_time"]/ 60  # convert to hours if needed
+    data.append({"Sentiment": sentiment, "Category": category, "AvgResponseTime": avg_time})
+
+df = pd.DataFrame(data)
+
+# Pivot for heatmap
+heatmap_df = df.pivot(index="Sentiment", columns="Category", values="AvgResponseTime")
+
+# Optional: sort rows and columns
+heatmap_df = heatmap_df.loc[["negative", "neutral", "positive"]]
+heatmap_df = heatmap_df[["negative shift", "stable", "positive shift"]]
+
+# Plot
+plt.figure(figsize=(10, 6))
+sns.heatmap(heatmap_df, annot=True, fmt=".1f", cmap="Blues", cbar_kws={'label': 'Avg Response Time (Hours)'})
+
+plt.title("Average Response Time by Sentiment and Category", fontsize=16, fontweight='bold')
+plt.xlabel("Category", fontsize=13)
+plt.ylabel("Sentiment", fontsize=13)
+plt.tight_layout()
+plt.show()
