@@ -1,0 +1,28 @@
+from pymongo import MongoClient
+import matplotlib.pyplot as plt
+import seaborn as sns 
+
+
+client = MongoClient("mongodb://localhost:27017/")
+db = client["final_db_macpro_3"]
+collection = db["convos_final_macpro_4"]
+
+cursor = collection.find(
+    {
+        "airline": "56377143",
+        "response_time": {"$exists": True, "$type": ["double", "int"]}
+    },
+    {"response_time": 1, "_id": 0}
+)
+
+response_times = [doc["response_time"] for doc in cursor if isinstance(doc["response_time"], (int, float))]
+response_times = [t for t in response_times if 500 < t < 1000]
+plt.figure(figsize=(10, 6))
+sns.kdeplot(response_times, fill=True, color='darkblue', linewidth=2)
+
+plt.title("Density Plot of Response Time for KLM (in minutes)", fontsize=16, fontweight='bold')
+plt.xlabel("Response Time", fontsize=14, fontweight='bold')
+plt.ylabel("Density", fontsize=14, fontweight='bold')
+plt.grid(True, linestyle='--', alpha=0.6)
+plt.tight_layout()
+plt.show()
