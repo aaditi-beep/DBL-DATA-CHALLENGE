@@ -1,0 +1,85 @@
+from pymongo import MongoClient
+import matplotlib.pyplot as plt
+import numpy as np
+
+client = MongoClient("mongodb://localhost:27017/")  
+db = client["final_db_macpro_3"] 
+collection = db["convos_final_macpro_4"]
+
+
+# airline_map = {
+#     "56377143": "KLM",
+#     "106062176": "AirFrance",
+#     "18332190": "British_Airways",
+#     "22536055": "AmericanAir",
+#     "124476322": "Lufthansa",
+#     "26223583": "AirBerlin",
+#     "2182373406": "AirBerlin assist",
+#     "38676903": "easyJet",
+#     "1542862735": "RyanAir",
+#     "253340062": "SingaporeAir",
+#     "218730857": "Qantas",
+#     "45621423": "EtihadAirways",
+#     "20626359": "VirginAtlantic"
+# }
+
+# airlines to focus on: American Air; British Airways; EasyJet; KLM; RyanAir
+airline_map = {"56377143": "KLM",
+               "22536055": "AmericanAir",
+               "18332190": "British_Airways",
+               "38676903": "easyJet",
+               "1542862735": "RyanAir",
+               }
+
+
+categories = ["positive shift", "stable", "negative shift"]
+airline_ids = list(airline_map.keys())
+labels = [airline_map[id] for id in airline_ids]
+
+
+pipeline = [
+    {
+        "$match": {
+            "airline": {"$in": airline_ids},
+            "category": {"$in": categories}
+        }
+    },
+    {
+        "$group": {
+            "_id": {"airline": "$airline", "category": "$category"},
+            "count": {"$sum": 1}
+        }
+    }
+]
+
+results = list(collection.aggregate(pipeline))
+
+data = {airline: {cat: 0 for cat in categories} for airline in airline_ids}
+for r in results:
+    airline = r["_id"]["airline"]
+    category = r["_id"]["category"]
+    count = r["count"]
+    data[airline][category] = count
+
+
+labels = [airline_map[id] for id in airline_ids]
+x = np.arange(len(labels))
+width = 0.25
+
+fig, ax = plt.subplots(figsize=(15, 7))
+
+bars_neg = ax.bar(x - width, [data[id]["negative shift"] for id in airline_ids], width, label='Negative Shift', color='#d73027')
+bars_stable = ax.bar(x, [data[id]["stable"] for id in airline_ids], width, label='Stable', color='#74add1')
+bars_pos = ax.bar(x + width, [data[id]["positive shift"] for id in airline_ids], width, label='Positive Shift', color='#313695')
+
+
+ax.set_xlabel('Airline', fontsize=14, fontweight='bold')
+ax.set_ylabel('Number of Conversations', fontsize=14, fontweight='bold')
+ax.set_title('Conversation Categories per Airline', fontsize=16, fontweight='bold')
+ax.set_xticks(x)
+ax.set_xticklabels(labels, rotation=45, ha='right', fontsize=12)
+ax.legend(title="Conversation Shift", title_fontsize=12)
+
+
+plt.tight_layout()
+plt.show()
