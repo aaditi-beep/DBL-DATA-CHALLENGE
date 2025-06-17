@@ -1,0 +1,41 @@
+import matplotlib.pyplot as plt
+import numpy as np
+
+# Data from your table
+airlines = [
+    "AmericanAir", "British Airways", "Easyjet", "RyanAir", "KLM",
+    "VirginAtlantic", "Lufthansa", "Qantas", "SingaporeAir", "AirFrance", "EtihadAirways"
+]
+
+negative = [100716, 65431, 40599, 32766, 20931, 9082, 10660, 8205, 5376, 5618, 3581]
+neutral =  [33030, 36951, 24736, 22829, 13016, 9468, 5757, 4292, 6118, 3710, 1960]
+positive = [19436, 15526, 8160, 6390, 6298, 7355, 2178, 2386, 2347, 1046, 930]
+
+# Convert to NumPy arrays for stacking
+neg = np.array(negative)
+neu = np.array(neutral)
+pos = np.array(positive)
+
+x = np.arange(len(airlines))
+
+# All shades of blue (colorblind friendly)
+color_negative = '#a6cee3'  # light blue
+color_neutral = '#1f78b4'   # medium blue
+color_positive = '#08306b'  # dark blue
+
+# Plot
+plt.figure(figsize=(16, 8))
+plt.bar(x, neg, label='Negative', color=color_negative)
+plt.bar(x, neu, bottom=neg, label='Neutral', color=color_neutral)
+plt.bar(x, pos, bottom=neg + neu, label='Positive', color=color_positive)
+
+# Labels and style
+plt.xticks(x, airlines, rotation=45, ha='right', fontsize=12, fontweight='bold')
+plt.yticks(fontsize=12)
+plt.xlabel("Airline", fontsize=14, fontweight='bold')
+plt.ylabel("Number of Conversations", fontsize=14, fontweight='bold')
+plt.title("SENTIMENT ANALYSIS – EXPLORATION", fontsize=18, fontweight='bold', color='#0070C0')
+plt.legend(title='', fontsize=12)
+plt.grid(axis='y', linestyle='--', alpha=0.5)
+plt.tight_layout()
+plt.show()
