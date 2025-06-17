@@ -1,0 +1,89 @@
+from pymongo import MongoClient
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# Connect to MongoDB
+client = MongoClient("mongodb://localhost:27017")
+db = client["final_db_macpro_3"]
+collection = db["convos_final_macpro_4"]
+
+# Airline ID to name mapping
+airline_id_to_name = {
+    "56377143": "KLM",
+    "18332190": "British Airways",
+    "22536055": "American Airlines",
+    "38676903": "EasyJet",
+    "1542862735": "Ryanair",
+    "124476322": "Lufthansa"
+}
+
+airline_ids = list(airline_id_to_name.keys())
+
+# Optional mapping from month name to numeric month (if needed)
+month_str_to_num = {
+    "january": "01", "february": "02", "march": "03", "april": "04",
+    "may": "05", "june": "06", "july": "07", "august": "08",
+    "september": "09", "october": "10", "november": "11", "december": "12"
+}
+
+# Step 1: Fetch relevant convos
+cursor = collection.find({
+    "response_time": {"$exists": True, "$ne": None},
+    "airline": {"$in": airline_ids},
+    "month": {"$exists": True},
+    "year": {"$exists": True}
+})
+
+# Step 2: Build DataFrame
+data = []
+for convo in cursor:
+    airline_id = convo["airline"]
+    airline = airline_id_to_name.get(airline_id, airline_id)
+    month_name = convo["month"].lower()
+    year = convo["year"]
+    
+    if month_name not in month_str_to_num:
+        continue  # skip malformed months
+    
+    month_num = month_str_to_num[month_name]
+    month_str = f"{year}-{month_num}"  # e.g. '2019-06'
+
+    data.append({
+        "Airline": airline,
+        "month": month_str,
+        "AvgResponseTime": convo["response_time"]
+    })
+
+df = pd.DataFrame(data)
+
+# Step 3: Group and pivot
+pivot_df = df.groupby(["month", "Airline"]).mean(numeric_only=True).reset_index()
+pivot_df = pivot_df.pivot(index="month", columns="Airline", values="AvgResponseTime").sort_index()
+
+# Step 4: Custom color plot
+plt.figure(figsize=(7, 6))
+
+# Custom airline colors
+airline_colors = {
+    "KLM": "#6baed6",               # Light Blue
+    "British Airways": "#08519c",  # Dark Blue
+    "American Airlines": "#e41a1c",# Red
+    "EasyJet": "#ff7f00",          # Orange
+    "Ryanair": "#4b5320",          # Military Green
+    "Lufthansa": "#6c757d"         # Gray-Blue
+}
+
+# Plot each airline manually with custom color
+for airline in pivot_df.columns:
+    plt.plot(pivot_df.index, pivot_df[airline], marker='o', label=airline, linewidth=2, color=airline_colors.get(airline, 'black'))
+
+plt.title("Average Response Time per Airline Over Time", fontsize=16, fontweight='bold')
+plt.ylabel("Avg Response Time (Minutes)", labelpad = 15)
+plt.xlabel("Month", fontsize = '12')
+plt.xticks(rotation=45)
+plt.legend(title="Airline")
+plt.grid(True)
+plt.tight_layout()
+plt.subplots_adjust(left=0.08)
+plt.show()
