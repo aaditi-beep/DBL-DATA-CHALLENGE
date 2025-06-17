@@ -1,0 +1,65 @@
+from pymongo import MongoClient
+import matplotlib.pyplot as plt
+import numpy as np
+
+client = MongoClient("mongodb://localhost:27017/")
+db = client["final_db_macpro_3"]
+collection = db["convos_final_macpro_4"]
+
+categories = ["positive shift", "stable", "negative shift"]
+target_languages = ["en", "nl"]  # Only English and Dutch
+
+pipeline = [
+    {
+        "$match": {
+            "airline": "56377143",
+            "category": {"$in": categories},
+            "lang": {"$in": target_languages}
+        }
+    },
+    {
+        "$group": {
+            "_id": {"lang": "$lang", "category": "$category"},
+            "count": {"$sum": 1}
+        }
+    }
+]
+
+results = list(collection.aggregate(pipeline))
+
+data = {}
+for result in results:
+    lang = result["_id"]["lang"]
+    category = result["_id"]["category"]
+    count = result["count"]
+    if lang not in data:
+        data[lang] = {cat: 0 for cat in categories}
+    data[lang][category] = count
+
+languages = sorted(data.keys())
+x = np.arange(len(languages))  
+width = 0.25
+
+pos_counts = [data[lang]["positive shift"] for lang in languages]
+stable_counts = [data[lang]["stable"] for lang in languages]
+neg_counts = [data[lang]["negative shift"] for lang in languages]
+
+lang_labels = {"en": "English", "nl": "Dutch"}
+
+fig, ax = plt.subplots(figsize=(5, 6))
+ax.bar(x - width, pos_counts, width, label="Positive Shift", color="#ADD8E6")   # Light Blue
+ax.bar(x, stable_counts, width, label="Stable", color="#4682B4")               # Medium Blue
+ax.bar(x + width, neg_counts, width, label="Negative Shift", color="#00008B") # Dark Blue
+
+ax.set_xlabel("Language", fontsize=14, fontweight="bold")
+ax.set_ylabel("Number of Conversations", fontsize=14, fontweight="bold")
+ax.set_title("Conversation Categories per \nLanguage for KLM", fontsize=16, fontweight="bold")
+ax.set_xticks(x)
+ax.set_xticklabels([lang_labels[lang] for lang in languages], rotation=45, ha='right', fontsize=12)
+ax.legend()
+
+plt.tight_layout()
+plt.subplots_adjust(top=0.88)
+
+plt.grid(axis='y', linestyle='--', alpha=0.6)
+plt.show()
