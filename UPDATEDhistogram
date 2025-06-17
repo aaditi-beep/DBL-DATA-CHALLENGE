@@ -1,0 +1,71 @@
+
+from pymongo import MongoClient
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+client = MongoClient("mongodb://localhost:27017")
+db = client["final_db_macpro_3"]
+collection = db["convos_final_macpro_4"]
+
+# Airline ID to Name Mapping
+airline_id_to_name = {
+    "56377143": "KLM",
+    "18332190": "British Airways",
+    "22536055": "American Airlines",
+    "38676903": "EasyJet",
+    "1542862735": "Ryanair",
+    "124476322": "Lufthansa"
+}
+
+airline_ids = list(airline_id_to_name.keys())  # For filtering in MongoDB query
+
+pipeline = [
+    {
+        "$match": {
+            "response_time": {"$exists": True, "$ne": None},
+            "final_label": {"$in": ["positive", "neutral", "negative"]},
+            "category": {"$in": ["positive shift", "stable", "negative shift"]},
+            "airline": {"$in": [aid for aid in airline_ids]}
+        }
+    },
+    {
+        "$group": {
+            "_id": {
+                "airline": "$airline",
+                "category": "$category"
+            },
+            "avg_response_time": {"$avg": "$response_time"}
+        }
+    }
+]
+
+results = list(collection.aggregate(pipeline))
+
+# Convert to DataFrame
+data = []
+for r in results:
+    airline_id = str(r["_id"]["airline"])
+    airline = airline_id_to_name.get(airline_id, airline_id)  # fallback to ID if name not found
+    category = r["_id"]["category"]
+    avg_time = r["avg_response_time"]
+    data.append({"Airline": airline, "Category": category, "AvgResponseTime": avg_time})
+
+df = pd.DataFrame(data)
+
+# Pivot for heatmap
+heatmap_df = df.pivot(index="Airline", columns="Category", values="AvgResponseTime")
+
+# Optional: order columns and rows manually
+heatmap_df = heatmap_df[["negative shift", "stable", "positive shift"]]
+heatmap_df = heatmap_df.reindex(["KLM", "British Airways", "American Airlines", "EasyJet", "Ryanair", "Lufthansa"])
+
+# Plot heatmap
+plt.figure(figsize=(10, 6))
+sns.heatmap(heatmap_df, annot=True, fmt=".1f", cmap="Blues", cbar_kws={'label': 'Avg Response Time (Hours)'})
+plt.title("Average Response Time by Airline and Category", fontsize=16, fontweight='bold')
+plt.xlabel("Category", fontsize=13)
+plt.ylabel("Airline", fontsize=13)
+plt.tight_layout()
+plt.show()
+
