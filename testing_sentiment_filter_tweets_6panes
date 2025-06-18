@@ -1,0 +1,129 @@
+import argparse
+import re
+from transformers import AutoTokenizer, AutoModelForSequenceClassification, AutoConfig
+from deep_translator import GoogleTranslator
+import torch
+from pymongo import MongoClient
+
+# ================== ARGUMENT PARSING ==================
+parser = argparse.ArgumentParser()
+parser.add_argument("--start_id", type=int, required=True)
+parser.add_argument("--end_id", type=int, required=True)
+args = parser.parse_args()
+start_id = args.start_id
+end_id = args.end_id
+
+# ================== MODEL LOADING ==================
+MODEL = "/Users/aaditimalhan/Downloads/data/sentiment_analysis/local_roberta"
+tokenizer = AutoTokenizer.from_pretrained(MODEL)
+model = AutoModelForSequenceClassification.from_pretrained(MODEL)
+config = AutoConfig.from_pretrained(MODEL)
+
+# ================== DB CONNECTION ==================
+client = MongoClient("mongodb://localhost:27017/")
+db = client["sentiment_analysis_full"]
+tweets_collection = db["tweets_filtered_6"]
+
+# ================== TRANSLATOR SETUP ==================
+translator = GoogleTranslator()
+
+# ================== HELPER FUNCTIONS ==================
+
+# Remove emojis (only for non-English)
+def remove_emojis(text):
+    emoji_pattern = re.compile(
+        "[" 
+        u"\U0001F600-\U0001F64F"
+        u"\U0001F300-\U0001F5FF"
+        u"\U0001F680-\U0001F6FF"
+        u"\U0001F1E0-\U0001F1FF"
+        u"\U00002700-\U000027BF"
+        u"\U000024C2-\U0001F251"
+        "]+", flags=re.UNICODE
+    )
+    return emoji_pattern.sub(r'', text)
+
+# Clean mentions and links
+def preprocess(text):
+    new_text = []
+    for t in text.split(" "):
+        t = '@user' if t.startswith('@') and len(t) > 1 else t
+        t = 'http' if t.startswith('http') else t
+        new_text.append(t)
+    return " ".join(new_text)
+
+# Translate only if not English, clean emojis only if needed
+def translate_text(text, lang_code):
+    if not isinstance(text, str) or not text.strip():
+        raise ValueError("Invalid input text")
+
+    if lang_code == "en":
+        return text, "en"
+
+    cleaned_text = remove_emojis(text)
+    try:
+        translated = GoogleTranslator(source='auto', target='en').translate(cleaned_text)
+        return translated, lang_code
+    except Exception as e:
+        print(f"[Translation warning] Fallback to original | ID unknown | Error: {e}")
+        return text, lang_code
+
+# Predict sentiment using the Roberta model
+def predict_sentiment(text):
+    processed_text = preprocess(text).strip()
+    if not processed_text or processed_text == "http":
+        raise ValueError("Empty or URL-only text")
+    encoded_input = tokenizer(processed_text, return_tensors='pt')
+    with torch.no_grad():
+        output = model(**encoded_input)
+    sentiment_id = int(torch.argmax(output.logits))
+    return config.id2label[sentiment_id]
+
+# ================== SENTIMENT ANALYSIS ==================
+
+# Counters
+count_positive = count_negative = count_neutral = count_failed = count_skipped = 0
+
+# Cursor range
+cursor = tweets_collection.find(
+    {"_id": {"$gte": start_id, "$lte": end_id}, "text": {"$exists": True, "$ne": None}},
+    no_cursor_timeout=True
+).sort("_id", 1)
+
+print(f"Processing from _id {start_id} to {end_id}...\n")
+
+
+for doc in cursor:
+    tweet_id = doc["_id"]
+    original_text = doc.get("text", "").strip()
+
+    if original_text.lower().startswith("http") or len(original_text) < 10:
+        count_skipped += 1
+        print(f"Skipped ID {tweet_id} (too short or URL-only)")
+        continue
+
+    lang = doc.get("lang", "und")
+
+    try:
+        translated_text, detected_lang = translate_text(original_text, lang)
+        sentiment = predict_sentiment(translated_text)
+
+        tweets_collection.update_one({"_id": tweet_id}, {
+            "$set": {
+                "translated_text": translated_text,
+                "original_language": detected_lang,
+                "sentiment": sentiment
+            }
+        })
+        print(f"ID {tweet_id} | Lang: {detected_lang} | Sentiment: {sentiment}")
+
+        if sentiment == "positive":
+            count_positive += 1
+        elif sentiment == "negative":
+            count_negative += 1
+        else:
+            count_neutral += 1
+
+    except Exception as e:
+        print(f"Failed ID {tweet_id}: {e}")
+        count_failed += 1
