@@ -1,0 +1,111 @@
+import pandas as pd
+import json
+import os
+from pathlib import Path
+
+# === List of failed file paths ===
+failed_files = [
+"/Users/aaditimalhan/Downloads/data/raw files DBL/airlines-1585575566328.json",
+"/Users/aaditimalhan/Downloads/data/raw files DBL/airlines-1565894560588.json",
+"/Users/aaditimalhan/Downloads/data/raw files DBL/airlines-1569957146471.json",
+"/Users/aaditimalhan/Downloads/data/raw files DBL/airlines-1583253051533.json",
+"/Users/aaditimalhan/Downloads/data/raw files DBL/airlines-1573229502947.json",
+"/Users/aaditimalhan/Downloads/data/raw files DBL/airlines-1558611772040.json",
+"/Users/aaditimalhan/Downloads/data/raw files DBL/airlines-1583171908044.json",
+"/Users/aaditimalhan/Downloads/data/raw files DBL/airlines-1559860041436.json",
+"/Users/aaditimalhan/Downloads/data/raw files DBL/airlines-1575313134067.json",
+"/Users/aaditimalhan/Downloads/data/raw files DBL/airlines-1570104381202.json",
+"/Users/aaditimalhan/Downloads/data/raw files DBL/airlines-1560138591670.json",
+"/Users/aaditimalhan/Downloads/data/raw files DBL/airlines-1558623303180.json"
+]
+
+# === Output folder for cleaned tweets ===
+output_folder = "/Users/aaditimalhan/Downloads/cleaned_tweets_macpro_2"
+os.makedirs(output_folder, exist_ok=True)
+
+# === Columns to clean ===
+vars_2b_scrapped_main_df = [
+    "display_text_range", "in_reply_to_status_id", "geo", "source", "coordinates", "is_quote_status",
+    "quote_count", "reply_count", "retweet_count", "favorite_count", "id", "contributors",
+    "truncated", "extended_tweet", "favorited", "retweeted", "filter_level", "user", "entities",
+    "retweeted_status", "quoted_status"
+]
+
+vars_2b_scrapped_user_df = [
+    "description", "name", "location", "url", "translator_type", "protected", "friends_count",
+    "listed_count", "favourites_count", "created_at", "utc_offset", "time_zone", "geo_enabled",
+    "is_translator", "lang", "contributors_enabled", "id", "following", "follow_request_sent", "notifications",
+    "profile_background_color", "profile_background_tile", "profile_link_color", "profile_sidebar_border_color",
+    "profile_text_color", "profile_use_background_image", "profile_image_url", "profile_image_url_https",
+    "profile_banner_url", "default_profile", "default_profile_image"
+]
+
+def grab_id_str(entities):
+    try:
+        return entities[0]['id_str']
+    except Exception:
+        return ""
+
+def grab_hashtag_text(entities):
+    try:
+        return entities[0]['text']
+    except Exception:
+        return ""
+
+def var_cleaner(df, columns):
+    for col in columns:
+        if col in df.columns:
+            del df[col]
+
+# === Processing loop ===
+for idx, input_file in enumerate(failed_files):
+    print(f"Reprocessing {idx + 1}/{len(failed_files)}: {input_file}")
+    try:
+        tweets = []
+        with open(input_file, "r", encoding="utf-8") as f:
+            for line_num, line in enumerate(f, 1):
+                try:
+                    tweet = json.loads(line)
+                    tweets.append(tweet)
+                except json.JSONDecodeError as err:
+                    print(f"⚠️ Skipping line {line_num} in {input_file} → {err}")
+        if not tweets:
+            print(f"No valid tweets in {input_file}, skipping...")
+            continue
+        df_all = pd.DataFrame(tweets)
+
+
+        # Safe extended tweet overwrite
+        if 'extended_tweet' in df_all.columns:
+            mask = df_all['truncated'] == True
+            df_all.loc[mask, 'text'] = df_all.loc[mask, 'extended_tweet'].apply(
+                lambda d: d.get('full_text', '') if isinstance(d, dict) else ''
+            )
+
+        # Safe entity extraction
+        if 'entities' in df_all.columns:
+            df_all['entities'] = df_all['entities'].apply(lambda x: x if isinstance(x, dict) else {})
+            df_entities = pd.json_normalize(df_all['entities'])
+            df_all['entities_hashtags'] = df_entities.get('hashtags', [[]]).apply(grab_hashtag_text)
+            df_all['entities_user_mentions'] = df_entities.get('user_mentions', [[]]).apply(grab_id_str)
+        else:
+            df_all['entities_hashtags'] = ""
+            df_all['entities_user_mentions'] = ""
+
+        # Normalize user
+        df_user = pd.json_normalize(df_all['user'])
+        var_cleaner(df_user, vars_2b_scrapped_user_df)
+        df_user.rename(columns=lambda x: 'user_' + x, inplace=True)
+        df_all = df_all.join(df_user)
+
+        # Clean main
+        var_cleaner(df_all, vars_2b_scrapped_main_df)
+
+        # Output
+        base_filename = os.path.splitext(os.path.basename(input_file))[0]
+        output_path = os.path.join(output_folder, f"{base_filename}_output.json")
+        df_all.to_json(output_path, orient='records', lines=True, force_ascii=False)
+        print(f"Saved to {output_path}")
+
+    except Exception as e:
+        print(f"Still failed: {input_file} → {e}")
