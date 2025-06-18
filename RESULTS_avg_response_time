@@ -1,0 +1,32 @@
+from pymongo import MongoClient
+from datetime import datetime
+
+client = MongoClient("mongodb://localhost:27017")
+db = client['final_db_macpro_3']   
+tweets_collection = db['final_db_macpro_3']
+conversations_collection = db['convos_final_macpro_4']
+
+airline_ids = {
+    "18332190", "56377143", "38676903", "218730857", "1542862735",
+    "22536055", "20626359", "253340062", "124476322", "45621423",
+    "260907612", "5920532", "13192972", "21964954", "21764143",
+    "6449282", "334032462", "821045162", "17077093", "387573617",
+    "16629918", "7212562"
+}
+
+pipeline = [
+    {"$match": {"airline": {"$in": list(airline_ids)}}},
+    {"$group": {
+        "_id": "$airline",
+        "avg_response_time": {"$avg": "$response_time"}
+    }}
+]
+
+results = conversations_collection.aggregate(pipeline)
+
+# Convert results to dictionary
+avg_times = {doc["_id"]: doc["avg_response_time"] for doc in results}
+
+# Print or return the result
+for airline_id, avg_time in avg_times.items():
+    print(f"Airline: {airline_id}, Avg Response Time: {avg_time:.2f}")
