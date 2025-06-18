@@ -1,0 +1,43 @@
+from pymongo import MongoClient
+
+client = MongoClient("mongodb://localhost:27017")
+db = client['final_db_macpro_3']
+conversations_collection = db['convos_final_macpro_4']
+users_collection = db['users_final_macpro_3']
+
+airline_ids = {
+    "18332190", "56377143", "38676903", "218730857", "1542862735",
+    "22536055", "20626359", "253340062", "124476322", "45621423",
+    "260907612", "5920532", "13192972", "21964954", "21764143",
+    "6449282", "334032462", "821045162", "17077093", "387573617",
+    "16629918", "7212562"
+}
+
+# 1. Aggregate avg response time by airline and month
+pipeline = [
+    {"$match": {"airline": {"$in": list(airline_ids)}}},
+    {"$group": {
+        "_id": {"airline": "$airline", "month": "$month"},
+        "avg_response_time": {"$avg": "$response_time"}
+    }}
+]
+
+results = conversations_collection.aggregate(pipeline)
+
+# 2. Organize data into a nested dictionary: {airline_id: {month: avg_time, ...}, ...}
+from collections import defaultdict
+
+airline_monthly_avg = defaultdict(dict)
+
+for doc in results:
+    airline = doc['_id']['airline']
+    month = doc['_id']['month']
+    avg_time = doc['avg_response_time']
+    airline_monthly_avg[airline][month] = avg_time
+
+# 3. Update each user document with the monthly averages
+for airline_id, month_data in airline_monthly_avg.items():
+    users_collection.update_one(
+        {"_id": airline_id},
+        {"$set": {"monthly_avg_response_time": month_data}}
+    )
