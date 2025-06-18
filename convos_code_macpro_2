@@ -1,0 +1,140 @@
+
+from pymongo import MongoClient
+from collections import defaultdict
+import time
+
+client = MongoClient("mongodb://localhost:27017/")
+db = client['final_db_macpro_3']
+tweets_collection = db['tweets_final_macpro_3']
+conversations_collection = db['convos_final_macpro_4']
+
+# Airline user IDs (as strings)
+airline_ids = {
+    "18332190", "56377143", "38676903", "218730857", "1542862735",
+    "22536055", "20626359", "253340062", "124476322", "45621423",
+    "260907612", "5920532", "13192972", "21964954", "21764143",
+    "6449282", "334032462", "821045162", "17077093", "387573617",
+    "16629918", "7212562"
+}
+
+start_time = time.time()
+
+# Preload tweets
+tweet_dict = {}
+replies = []
+print("Loading tweets into memory...")
+for tweet in tweets_collection.find({}, {"_id": 1, "id_str": 1, "user_id_str": 1, "in_reply_to_status_id_str": 1, "root": 1}):
+    tweet_dict[tweet["id_str"]] = tweet
+    if not tweet.get("root"):
+        replies.append(tweet)
+
+# Also index by _id for chain lookup
+id_to_tweet = {tweet["_id"]: tweet for tweet in tweet_dict.values()}
+
+# Clear old conversations
+conversations_collection.delete_many({})
+
+# Step 1: Create root conversations
+print("Creating root conversations...")
+ci = 1
+convos_by_root = defaultdict(list)
+conversation_ids_by_root = defaultdict(list)
+for tweet in tweet_dict.values():
+    if tweet.get("root"):
+        uid = tweet["user_id_str"]
+        convo = {
+            "_id": f"c{ci}",
+            "root_tweet": tweet["_id"],
+            "tweets": [tweet["_id"]],
+            "participants": [uid],
+            "airline": uid if uid in airline_ids else None
+        }
+        conversations_collection.insert_one(convo)
+        convos_by_root[tweet["_id"]].append(convo)
+        conversation_ids_by_root[tweet["_id"]].append(convo["_id"])
+        ci += 1
+
+# Step 2: Process replies
+print("Processing replies...")
+updated_replied_ids = set()
+
+for idx, tweet in enumerate(replies):
+    chain = [tweet["_id"]]
+    seen = set()
+    parent_id_str = tweet.get("in_reply_to_status_id_str")
+    while parent_id_str and parent_id_str not in seen and parent_id_str not in [None, "None"]:
+        seen.add(parent_id_str)
+        parent = tweet_dict.get(parent_id_str)
+        if not parent:
+            break
+        chain.insert(0, parent["_id"])
+        parent_id_str = parent.get("in_reply_to_status_id_str")
+
+    root_id = chain[0]
+    root_tweet = id_to_tweet.get(root_id)
+    if not root_tweet:
+        continue
+
+    if root_id not in updated_replied_ids:
+        tweets_collection.update_one({"_id": root_id}, {"$set": {"replied": True}})
+        updated_replied_ids.add(root_id)
+
+    participants_users = [uid for tid in chain if (uid := id_to_tweet.get(tid, {}).get("user_id_str"))]
+
+    matched = False
+    for convo in convos_by_root[root_id]:
+        conv_tweets = convo["tweets"]
+        if chain == conv_tweets + [chain[-1]]:
+            conversations_collection.update_one({"_id": convo["_id"]}, {"$addToSet": {"tweets": chain[-1], "participants": tweet["user_id_str"]}})
+            matched = True
+            break
+        elif conv_tweets == chain[:len(conv_tweets)]:
+            for tid in chain[len(conv_tweets):]:
+                uid = id_to_tweet.get(tid, {}).get("user_id_str")
+                if uid:
+                    conversations_collection.update_one(
+                        {"_id": convo["_id"]},
+                        {"$addToSet": {
+                            "tweets": tid,
+                            "participants": uid
+                        }}
+                    )
+            matched = True
+            break
+
+    if not matched:
+        # Combine all participants safely
+        all_participants = list(dict.fromkeys(participants_users + [root_tweet["user_id_str"]]))
+        # Airline assignment (string match)
+        airline_uid = next((uid for uid in all_participants if str(uid) in airline_ids), None)
+
+        # DEBUGGING PRINTS
+        print(f"\nCreating new convo {ci}")
+        print(f"Participants: {all_participants}")
+        print(f"Matched airline IDs: {[uid for uid in all_participants if str(uid) in airline_ids]}")
+        print(f"Assigned airline: {airline_uid}")
+
+        convo = {
+            "_id": f"c{ci}",
+            "root_tweet": root_id,
+            "tweets": chain,
+            "participants": all_participants,
+            "airline": airline_uid
+        }
+        conversations_collection.insert_one(convo)
+        convos_by_root[root_id].append(convo)
+        conversation_ids_by_root[root_id].append(convo["_id"])
+        tweets_collection.update_one({"_id": root_id}, {"$addToSet": {"conversation_ids": convo["_id"]}})
+        ci += 1
+
+    if idx % 1000 == 0:
+        print(f"{idx} replies processed...")
+
+# Step 3: Apply constraints
+print("Applying constraints...")
+conversations_collection.delete_many({"$expr": {"$lt": [{"$size": "$participants"}, 2]}})
+conversations_collection.delete_many({"$expr": {"$lt": [{"$size": "$tweets"}, 3]}})
+conversations_collection.delete_many({"participants": {"$not": {"$elemMatch": {"$in": list(airline_ids)}}}})
+
+print(f"\nDone in {time.time() - start_time:.2f} seconds")
+
