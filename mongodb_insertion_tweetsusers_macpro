@@ -1,0 +1,89 @@
+from pymongo import MongoClient
+import json
+import os
+import datetime
+
+# MongoDB setup
+client = MongoClient("mongodb://localhost:27017/")
+db = client['final_db_macpro_3']
+tweets_collection = db['tweets_final_macpro_3']
+users_collection = db['users_final_macpro_3']
+
+# Folder containing cleaned JSON files
+directory = "/Users/aaditimalhan/Downloads/cleaned_tweets_out"
+
+# Track which users have already been inserted
+users_mongo = set()
+
+# Only keep tweets in these languages
+allowed_langs = {'en', 'es', 'fr', 'nl'}
+
+# Tweet ID integer _id counter
+tweet_id_counter = 1
+
+# Loop over all cleaned .json files
+for file in os.listdir(directory):
+    if not file.endswith(".json"):
+        continue
+
+    path = os.path.join(directory, file)
+
+    with open(path, 'r', encoding='utf-8') as f:
+        for line in f:
+            try:
+                tweet_obj = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            # Skip deleted tweets
+            if tweet_obj.get('delete'):
+                continue
+
+            # Convert created_at if it's in milliseconds
+            timestamp_ms = tweet_obj.get('created_at')
+            if isinstance(timestamp_ms, int) or isinstance(timestamp_ms, float):
+                try:
+                    dt = datetime.datetime.fromtimestamp(timestamp_ms / 1000, tz=datetime.timezone.utc)
+                    tweet_obj['created_at'] = dt.strftime('%Y-%m-%d %H:%M:%S')
+                except Exception as e:
+                    print(f"Error converting timestamp for {tweet_obj.get('id_str')}: {e}")
+                    continue
+
+            # Language filter
+            if tweet_obj.get('lang') not in allowed_langs:
+                continue
+
+            user_id = tweet_obj.get('user_id_str')
+            tweet_id_str = tweet_obj.get('id_str')
+
+            # Insert user if not already inserted
+            if user_id and user_id not in users_mongo:
+                user_doc = {
+                    "_id": user_id,
+                    "verified": tweet_obj.get('user_verified'),
+                    "screen_name": tweet_obj.get('user_screen_name'),
+                    "followers_count": tweet_obj.get('user_followers_count'),
+                    "statuses_count": tweet_obj.get('user_statuses_count'),
+                }
+                try:
+                    users_collection.insert_one(user_doc)
+                    users_mongo.add(user_id)
+                except Exception as e:
+                    print(f"Failed to insert user {user_id}: {e}")
+
+            # Determine if this is a root tweet
+            tweet_obj['root'] = tweet_obj.get('in_reply_to_status_id_str') in [None, "None"]
+            tweet_obj['replied'] = False
+
+            # Assign integer _id for tweet
+            tweet_obj['_id'] = tweet_id_counter
+            tweet_id_counter += 1
+
+            # Insert tweet
+            try:
+                tweets_collection.insert_one(tweet_obj)
+            except Exception as e:
+                print(f"Failed to insert tweet: {tweet_obj.get('id_str')} → {e}")
+                continue
+
+print("\nAll cleaned tweets have been inserted into MongoDB.")
