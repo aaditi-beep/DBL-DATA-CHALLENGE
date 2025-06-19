@@ -1,0 +1,71 @@
+from pymongo import MongoClient
+from datetime import datetime
+
+client = MongoClient("mongodb://localhost:27017")
+db = client['final_db_macpro_3']
+tweets_collection = db['tweets_final_macpro_3']
+users_collection = db['users_final_macpro_3']
+conversations_collection = db['convos_final_macpro_4']
+
+airline_ids = {
+    "18332190", "56377143", "38676903", "218730857", "1542862735",
+    "22536055", "20626359", "253340062", "124476322", "45621423",
+    "260907612", "5920532", "13192972", "21964954", "21764143",
+    "6449282", "334032462", "821045162", "17077093", "387573617",
+    "16629918", "7212562"
+}
+
+def find_all_indexes(users):
+    return [idx for idx, user_id in enumerate(users) if user_id in airline_ids]
+
+# Process conversations and calculate response time
+i = 0
+for convo in conversations_collection.find():
+    tweets = convo['tweets']
+    thread = convo['thread']
+    root_tweet_id = convo['root_tweet']
+
+    # Align users to tweets correctly
+    users = [thread[str(tweet_id)][0] for tweet_id in tweets if str(tweet_id) in thread]
+
+    airline_reply_indexes = find_all_indexes(users)
+
+    response_time = None
+
+    for idx in airline_reply_indexes:
+        if idx == 0:
+            continue
+
+        try:
+            reply_tweet_id = tweets[idx]
+            prev_tweet_id = tweets[idx - 1]
+
+            reply_tweet = tweets_collection.find_one({'_id': reply_tweet_id})
+            prev_tweet = tweets_collection.find_one({'_id': prev_tweet_id})
+
+            if not reply_tweet or not prev_tweet:
+                continue
+
+            start_time_str = prev_tweet['created_at']
+            end_time_str = reply_tweet['created_at']
+
+            start_dt = datetime.strptime(start_time_str.strip(), '%Y-%m-%d %H:%M:%S')
+            end_dt = datetime.strptime(end_time_str.strip(), '%Y-%m-%d %H:%M:%S')
+
+            delta_minutes = (end_dt - start_dt).total_seconds() / 60
+            response_time = delta_minutes
+            break  # stop after the first airline response
+
+        except Exception as e:
+            print(f"Error in convo {convo['_id']} at index {idx}: {e}")
+            continue
+
+    if response_time is not None:
+        conversations_collection.update_one(
+            {"_id": convo['_id']},
+            {"$set": {"response_time": response_time}}
+        )
+
+    i += 1
+    if i % 10000 == 0:
+        print(f"{i} convos processed")
