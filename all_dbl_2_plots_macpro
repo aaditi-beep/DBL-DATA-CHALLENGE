@@ -1,0 +1,526 @@
+###---IMPORTS---###
+from pymongo import MongoClient
+from datetime import datetime
+import matplotlib.pyplot as plt
+import seaborn as sns
+import numpy as np
+import pandas as pd
+from collections import defaultdict
+
+
+###---Connect to MongoDB---###
+client = MongoClient("mongodb://localhost:27017")
+db = client['final_db_macpro_3']
+tweets_collection = db['tweets_final_macpro_3']
+conversations_collection = db['convos_final_macpro_4']
+
+###---AIRLINE DICTIONARY---###
+airline_ids = {
+    "22536055": "AmericanAir",
+    "18332190": "British Airways",
+    "38676903": "EasyJet",
+    "1542862735": "Ryanair",
+    "56377143": "KLM",
+    "20626359": "VirginAtlantic",
+    "124476322": "Lufthansa",
+    "218730857": "Qantas",
+    "253340062": "SingaporeAir",
+    "106062176": "AirFrance",
+    "45621423": "EtihadAirways"
+    }
+
+
+
+
+###---PLOTS START---###
+
+###---PLOT 1---###
+pipeline = [
+    {"$match": {"sentiment": {"$exists": True}}},
+    {"$group": {"_id": "$lang", "count": {"$sum": 1}}}
+]
+
+results = list(tweets_collection.aggregate(pipeline))
+
+labels = [doc['_id'] for doc in results]
+sizes = [doc['count'] for doc in results]
+
+num_colors = len(sizes)
+colors = plt.cm.Blues([0.4 + (0.5 * i / num_colors) for i in range(num_colors)])
+
+plt.figure(figsize=(8, 8))
+plt.pie(sizes, labels=labels, colors=colors, autopct='%1.1f%%', startangle=140)
+plt.title("Language Distribution of Sentiment-Analysed Tweets", fontsize=14, fontweight='bold')
+plt.axis('equal')  # Keeps the pie chart circular
+plt.tight_layout()
+plt.show()
+
+
+###---PLOT 2---###
+pipeline = [
+    {
+        "$match": {
+            "airline": {"$in": list(airline_ids.keys())},
+            "final_label": {"$in": ["negative", "neutral", "positive"]}
+        }
+    },
+    {
+        "$group": {
+            "_id": {
+                "airline": "$airline",
+                "label": "$final_label"
+            },
+            "count": {"$sum": 1}
+        }
+    }
+]
+
+results = list(conversations_collection.aggregate(pipeline))
+
+sentiment_counts = {
+    "AmericanAir": {"negative": 0, "neutral": 0, "positive": 0},
+    "British Airways": {"negative": 0, "neutral": 0, "positive": 0},
+    "EasyJet": {"negative": 0, "neutral": 0, "positive": 0},
+    "Ryanair": {"negative": 0, "neutral": 0, "positive": 0},
+    "KLM": {"negative": 0, "neutral": 0, "positive": 0},
+    "VirginAtlantic": {"negative": 0, "neutral": 0, "positive": 0},
+    "Lufthansa": {"negative": 0, "neutral": 0, "positive": 0},
+    "Qantas": {"negative": 0, "neutral": 0, "positive": 0},
+    "SingaporeAir": {"negative": 0, "neutral": 0, "positive": 0},
+    "AirFrance": {"negative": 0, "neutral": 0, "positive": 0},
+    "EtihadAirways": {"negative": 0, "neutral": 0, "positive": 0}
+}
+
+for doc in results:
+    airline_id = doc["_id"]["airline"]
+    label = doc["_id"]["label"]
+    airline_name = airline_ids.get(airline_id)
+    if airline_name:
+        sentiment_counts[airline_name][label] += doc["count"]
+
+airlines = list(sentiment_counts.keys())
+negative = [sentiment_counts[a]["negative"] for a in airlines]
+neutral =  [sentiment_counts[a]["neutral"] for a in airlines]
+positive = [sentiment_counts[a]["positive"] for a in airlines]
+
+x = np.arange(len(airlines))
+neg = np.array(negative)
+neu = np.array(neutral)
+pos = np.array(positive)
+
+plt.figure(figsize=(16, 8))
+plt.bar(x, neg, label='Negative', color='#a6cee3')
+plt.bar(x, neu, bottom=neg, label='Neutral', color='#1f78b4')
+plt.bar(x, pos, bottom=neg + neu, label='Positive', color='#08306b')
+
+plt.xticks(x, airlines, rotation=45, ha='right', fontsize=12, fontweight='bold')
+plt.yticks(fontsize=12)
+plt.xlabel("Airline", fontsize=14, fontweight='bold')
+plt.ylabel("Number of Conversations", fontsize=14, fontweight='bold')
+plt.title("SENTIMENT ANALYSIS – EXPLORATION", fontsize=18, fontweight='bold', color='#0070C0')
+plt.legend(title='', fontsize=12)
+plt.grid(axis='y', linestyle='--', alpha=0.5)
+plt.tight_layout()
+plt.show()
+
+###---PLOT 3---###
+query = {
+    "airline": "56377143", 
+    "category": {"$in": ["positive shift", "negative shift", "stable"]}
+}
+
+pipeline = [
+    {"$match": query},
+    {"$group": {
+        "_id": "$category",
+        "count": {"$sum": 1}
+    }}
+]
+
+results = list(conversations_collection.aggregate(pipeline))
+
+
+categories = ["positive shift", "negative shift", "stable"]
+counts = {cat: 0 for cat in categories}
+for result in results:
+    counts[result["_id"]] = result["count"]
+
+plt.bar(counts.keys(), counts.values(), color=["orange", "darkblue", "grey"])
+
+plt.xlabel("Category", fontsize=14)
+plt.ylabel("Number of Conversations", fontsize=14)
+plt.title("Conversation Sentiment Categories for KLM", fontsize=16, fontweight='bold')
+plt.show()
+
+
+###---PLOT 4---###
+categories = ["positive shift", "stable", "negative shift"]
+target_languages = ["en", "nl"]  # Only English and Dutch
+
+pipeline = [
+    {
+        "$match": {
+            "airline": "56377143",
+            "category": {"$in": categories},
+            "lang": {"$in": target_languages}
+        }
+    },
+    {
+        "$group": {
+            "_id": {"lang": "$lang", "category": "$category"},
+            "count": {"$sum": 1}
+        }
+    }
+]
+
+results = list(conversations_collection.aggregate(pipeline))
+
+data = {}
+for result in results:
+    lang = result["_id"]["lang"]
+    category = result["_id"]["category"]
+    count = result["count"]
+    if lang not in data:
+        data[lang] = {cat: 0 for cat in categories}
+    data[lang][category] = count
+
+languages = sorted(data.keys())
+x = np.arange(len(languages))  
+width = 0.25
+
+pos_counts = [data[lang]["positive shift"] for lang in languages]
+stable_counts = [data[lang]["stable"] for lang in languages]
+neg_counts = [data[lang]["negative shift"] for lang in languages]
+
+lang_labels = {"en": "English", "nl": "Dutch"}
+
+fig, ax = plt.subplots(figsize=(5, 6))
+ax.bar(x - width, pos_counts, width, label="Positive Shift", color="#ADD8E6")   # Light Blue
+ax.bar(x, stable_counts, width, label="Stable", color="#4682B4")               # Medium Blue
+ax.bar(x + width, neg_counts, width, label="Negative Shift", color="#00008B") # Dark Blue
+
+ax.set_xlabel("Language", fontsize=14, fontweight="bold")
+ax.set_ylabel("Number of Conversations", fontsize=14, fontweight="bold")
+ax.set_title("Conversation Categories per \nLanguage for KLM", fontsize=16, fontweight="bold")
+ax.set_xticks(x)
+ax.set_xticklabels([lang_labels[lang] for lang in languages], rotation=45, ha='right', fontsize=12)
+ax.legend()
+
+plt.tight_layout()
+plt.subplots_adjust(top=0.88)
+
+plt.grid(axis='y', linestyle='--', alpha=0.6)
+plt.show()
+
+
+###---PLOT 9---###
+airline_map = {"56377143": "KLM",
+               "22536055": "AmericanAir",
+               "18332190": "British Airways",
+               "38676903": "easyJet",
+               "1542862735": "RyanAir",
+               "124476322": "Lufthansa"
+               }
+
+
+categories = ["positive shift", "stable", "negative shift"]
+airline_ids = list(airline_map.keys())
+labels = [airline_map[id] for id in airline_ids]
+
+
+pipeline = [
+    {
+        "$match": {
+            "airline": {"$in": airline_ids},
+            "category": {"$in": categories}
+        }
+    },
+    {
+        "$group": {
+            "_id": {"airline": "$airline", "category": "$category"},
+            "count": {"$sum": 1}
+        }
+    }
+]
+
+results = list(conversations_collection.aggregate(pipeline))
+
+data = {airline: {cat: 0 for cat in categories} for airline in airline_ids}
+for r in results:
+    airline = r["_id"]["airline"]
+    category = r["_id"]["category"]
+    count = r["count"]
+    data[airline][category] = count
+
+
+labels = [airline_map[id] for id in airline_ids]
+x = np.arange(len(labels))
+width = 0.25
+
+fig, ax = plt.subplots(figsize=(15, 7))
+
+bars_neg = ax.bar(x - width, [data[id]["negative shift"] for id in airline_ids], width, label='Negative Shift', color='#d73027')
+bars_stable = ax.bar(x, [data[id]["stable"] for id in airline_ids], width, label='Stable', color='#74add1')
+bars_pos = ax.bar(x + width, [data[id]["positive shift"] for id in airline_ids], width, label='Positive Shift', color='#313695')
+
+
+ax.set_xlabel('Airline', fontsize=14, fontweight='bold')
+ax.set_ylabel('Number of Conversations', fontsize=14, fontweight='bold')
+ax.set_title('Conversation Categories per Airline', fontsize=16, fontweight='bold')
+ax.set_xticks(x)
+ax.set_xticklabels(labels, rotation=45, ha='right', fontsize=12)
+ax.legend(title="Conversation Shift", title_fontsize=12)
+
+
+plt.tight_layout()
+plt.show()
+
+###---PLOT 10---###
+airline_id_to_name = {
+    "56377143": "KLM",
+    "18332190": "British Airways",
+    "22536055": "American Airlines",
+    "38676903": "EasyJet",
+    "1542862735": "Ryanair",
+    "124476322": "Lufthansa"
+}
+pipeline = [
+    {"$match": {
+        "response_time": {"$exists": True, "$ne": None},
+        "final_label": {"$in": ["positive", "neutral", "negative"]},
+        "category": {"$in": ["positive shift", "stable", "negative shift"]},
+        "airline": {"$in": list(airline_id_to_name.keys())}
+    }},
+    {"$group": {
+        "_id": {"airline": "$airline", "category": "$category"},
+        "avg_response_time": {"$avg": "$response_time"}
+    }}
+]
+results = list(conversations_collection.aggregate(pipeline))
+data = []
+for r in results:
+    airline = airline_id_to_name.get(str(r["_id"]["airline"]), r["_id"]["airline"])
+    data.append({"Airline": airline, "Category": r["_id"]["category"], "AvgResponseTime": r["avg_response_time"]})
+df = pd.DataFrame(data)
+heatmap_df = df.pivot(index="Airline", columns="Category", values="AvgResponseTime")
+heatmap_df = heatmap_df[["negative shift", "stable", "positive shift"]]
+heatmap_df = heatmap_df.reindex(["KLM", "British Airways", "American Airlines", "EasyJet", "Ryanair", "Lufthansa"])
+plt.figure(figsize=(10, 6))
+sns.heatmap(heatmap_df, annot=True, fmt=".1f", cmap="Blues", cbar_kws={'label': 'Avg Response Time (Hours)'})
+plt.title("Average Response Time by Airline and Category", fontsize=16, fontweight='bold')
+plt.xlabel("Category", fontsize=13)
+plt.ylabel("Airline", fontsize=13)
+plt.tight_layout()
+plt.show()
+
+
+###---PLOT 10---###
+query = {
+    "category": {"$in": ["positive shift", "stable", "negative shift"]}
+}
+
+pipeline = [
+    {"$match": query},
+    {"$group": {
+        "_id": "$category",
+        "count": {"$sum": 1}
+    }}
+]
+
+results = list(conversations_collection.aggregate(pipeline))
+
+categories = ["positive shift", "stable", "negative shift"]
+counts = {cat: 0 for cat in categories}
+for result in results:
+    counts[result["_id"]] = result["count"]
+
+plt.bar(counts.keys(), counts.values(), color=["darkorange", "darkblue", "grey"])
+
+plt.xlabel("Category", fontsize=12, fontweight='bold')
+plt.ylabel("Number of Conversations", fontsize=12, fontweight='bold')
+plt.title("Conversation Sentiment for All Airlines", fontsize=16, fontweight='bold')
+
+plt.show()
+
+###---plot 11---###
+cursor = conversations_collection.find(
+    {
+        "airline": "56377143",
+        "response_time": {"$exists": True, "$type": ["double", "int"]}
+    },
+    {"response_time": 1, "_id": 0}
+)
+
+response_times = [doc["response_time"] for doc in cursor if isinstance(doc["response_time"], (int, float))]
+response_times = [t for t in response_times if 500 < t < 1000]
+plt.figure(figsize=(10, 6))
+sns.kdeplot(response_times, fill=True, color='darkblue', linewidth=2)
+
+plt.title("Density Plot of Response Time for KLM (in minutes)", fontsize=16, fontweight='bold')
+plt.xlabel("Response Time", fontsize=14, fontweight='bold')
+plt.ylabel("Density", fontsize=14, fontweight='bold')
+plt.grid(True, linestyle='--', alpha=0.6)
+plt.tight_layout()
+plt.show()
+
+###---PLOT 11---###
+
+# Airline ID to name mapping
+airline_id_to_name = {
+    "56377143": "KLM",
+    "18332190": "British Airways",
+    "22536055": "American Airlines",
+    "38676903": "EasyJet",
+    "1542862735": "Ryanair",
+    "124476322": "Lufthansa"
+}
+
+airline_ids = list(airline_id_to_name.keys())
+
+# Optional mapping from month name to numeric month (if needed)
+month_str_to_num = {
+    "january": "01", "february": "02", "march": "03", "april": "04",
+    "may": "05", "june": "06", "july": "07", "august": "08",
+    "september": "09", "october": "10", "november": "11", "december": "12"
+}
+
+# Step 1: Fetch relevant convos
+cursor = conversations_collection.find({
+    "response_time": {"$exists": True, "$ne": None},
+    "airline": {"$in": airline_ids},
+    "month": {"$exists": True},
+    "year": {"$exists": True}
+})
+
+# Step 2: Build DataFrame
+data = []
+for convo in cursor:
+    airline_id = convo["airline"]
+    airline = airline_id_to_name.get(airline_id, airline_id)
+    month_name = convo["month"].lower()
+    year = convo["year"]
+    
+    if month_name not in month_str_to_num:
+        continue  # skip malformed months
+    
+    month_num = month_str_to_num[month_name]
+    month_str = f"{year}-{month_num}"  # e.g. '2019-06'
+
+    data.append({
+        "Airline": airline,
+        "month": month_str,
+        "AvgResponseTime": convo["response_time"]
+    })
+
+df = pd.DataFrame(data)
+
+# Step 3: Group and pivot
+pivot_df = df.groupby(["month", "Airline"]).mean(numeric_only=True).reset_index()
+pivot_df = pivot_df.pivot(index="month", columns="Airline", values="AvgResponseTime").sort_index()
+
+# Step 4: Custom color plot
+plt.figure(figsize=(7, 6))
+
+# Custom airline colors
+airline_colors = {
+    "KLM": "#6baed6",               # Light Blue
+    "British Airways": "#08519c",  # Dark Blue
+    "American Airlines": "#e41a1c",# Red
+    "EasyJet": "#ff7f00",          # Orange
+    "Ryanair": "#4b5320",          # Military Green
+    "Lufthansa": "#6c757d"         # Gray-Blue
+}
+
+# Plot each airline manually with custom color
+for airline in pivot_df.columns:
+    plt.plot(pivot_df.index, pivot_df[airline], marker='o', label=airline, linewidth=2, color=airline_colors.get(airline, 'black'))
+
+plt.title("Average Response Time per Airline Over Time", fontsize=16, fontweight='bold')
+plt.ylabel("Avg Response Time (Minutes)", labelpad = 15)
+plt.xlabel("Month", fontsize = '12')
+plt.xticks(rotation=45)
+plt.legend(title="Airline")
+plt.grid(True)
+plt.tight_layout()
+plt.subplots_adjust(left=0.08)
+plt.show()
+
+
+###---PLOT 12---###
+
+labels = ["positive", "neutral", "negative", "skipped"]
+pipeline = [
+    {"$match": {"sentiment": {"$in": labels}}},
+    {"$group": {"_id": "$sentiment", "count": {"$sum": 1}}}
+]
+results = list(tweets_collection.aggregate(pipeline))
+
+missing_count = tweets_collection.count_documents({"sentiment": {"$exists": False}})
+
+label_names = [entry['_id'] for entry in results]
+counts = [entry['count'] for entry in results] + [missing_count]
+
+label_names, counts = zip(*sorted(zip(label_names, counts)))
+
+num_bars = len(label_names)
+colors = plt.cm.Blues([0.4 + 0.5 * (i / num_bars) for i in range(num_bars)])
+
+plt.figure(figsize=(12, 7))
+bars = plt.bar(label_names, counts, color=colors)
+plt.xlabel("Sentiment Label", fontsize=16)
+plt.ylabel("Number of Tweets", fontsize=16)
+plt.title("Sentiment Distribution in Analysed Tweets", fontweight='bold')
+plt.xticks(rotation=15)
+plt.tight_layout()
+plt.show()
+
+
+###---PLOT 11---###
+
+airline_map = {
+    "56377143": "KLM",
+    "22536055": "AmericanAir",
+    "18332190": "British Airways",
+    "38676903": "easyJet",
+    "1542862735": "RyanAir"
+}
+categories = ["negative shift", "stable", "positive shift"]
+pipeline = [
+    {
+        "$match": {
+            "airline": {"$in": list(airline_map.keys())},
+            "category": {"$in": categories},
+            "lang": {"$in": ["en", "nl", "fr", "es"]}
+        }
+    },
+    {
+        "$group": {
+            "_id": {
+                "airline": "$airline",
+                "category": "$category"
+            },
+            "count": {"$sum": 1}
+        }
+    }
+]
+results = list(conversations_collection.aggregate(pipeline))
+data = []
+for r in results:
+    airline_name = airline_map[r["_id"]["airline"]]
+    category = r["_id"]["category"]
+    count = r["count"]
+    data.append({
+        "Airline": airline_name,
+        "Category": category,
+        "Count": count
+    })
+df = pd.DataFrame(data)
+heatmap_df = df.pivot(index="Airline", columns="Category", values="Count").fillna(0).astype(int)
+heatmap_df = heatmap_df[["negative shift", "stable", "positive shift"]]
+plt.figure(figsize=(10, 6))
+sns.heatmap(heatmap_df, annot=True, fmt="d", cmap="Blues", cbar_kws={'label': 'Conversation Count'})
+plt.title("Conversation Category Counts per Airline", fontsize=16, fontweight='bold')
+plt.xlabel("Conversation Category", fontsize=13)
+plt.ylabel("Airline", fontsize=13)
+plt.tight_layout()
+plt.show()
