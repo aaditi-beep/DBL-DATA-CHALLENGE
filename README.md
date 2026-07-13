@@ -1,93 +1,67 @@
-# DBL
+# DBL Data Challenge — Airline Customer Service on Twitter
 
+A data pipeline and analysis project studying how airlines handle customer
+service interactions on Twitter: response times, sentiment, and conversation
+flow, across multiple carriers.
 
+## What this project does
 
-## Getting started
+- **Ingests** raw tweet/user data into MongoDB, cleaning malformed records and
+  linking tweets into full conversation threads.
+- **Engineers features** on top of the raw conversations: response time per
+  reply, conversation flow labels, month/time tagging, language and location
+  fields.
+- **Runs sentiment analysis** on conversations two ways: a rule-based pass
+  (VADER) for the main pipeline, and a transformer-based model
+  (`cardiffnlp/twitter-xlm-roberta-base-sentiment`) benchmarked against the
+  public TweetEval sentiment dataset, evaluated with a classification report
+  and confusion matrix.
+- **Aggregates analytics** per airline: average response time overall, per
+  month, and per sentiment category.
+- **Visualizes** results: response-time distributions, sentiment-evolution
+  plots, per-airline comparisons, and colorblind-safe conversation-category
+  breakdowns.
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+## Tech stack
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+Python, MongoDB (`pymongo`), pandas, VADER sentiment, HuggingFace
+`transformers` (XLM-RoBERTa sentiment model) + `datasets` (TweetEval),
+scikit-learn (classification report/confusion matrix), matplotlib/seaborn.
 
-## Add your files
+## Project map (by branch)
 
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+This was a team project built across feature branches during the challenge
+sprint. The table below maps each stage of the pipeline to where the code
+actually lives, so it's navigable without digging through branch history.
 
+| Stage | Branch | What's there |
+|---|---|---|
+| Data cleaning & ingestion | `final_code_1_aaditi_macpro` | `clean_tweets_macpro_3`, `failed_clean_tweets_macpro`, `mongodb_clean_3b`, `mongodb_insertion_tweetsusers_macpro` |
+| Conversation feature engineering | `delta_convos-10-11_June`, `months_to_tweets_collec_macpro` | response time, month tagging, place/language fields |
+| Sentiment analysis (rule-based) | `final_code_1_aaditi_macpro` | `testing_sentiment_filter_tweets_6panes`, `convo_flow_etc_macpro` |
+| Sentiment analysis (transformer, benchmarked) | `tweeteval_evaluation_plus_confusionmatrixcode` | `twitter_sentiment_eval_macpro.py` — evaluates XLM-RoBERTa sentiment on TweetEval, reports classification metrics + confusion matrix |
+| Per-airline response-time analytics | `avg_response_time_per_airline_just_prints`, `per_airline_monthly_averages_and_DB_update` | average and monthly response time per airline |
+| Visualizations | `plots_macpro` | histograms, KDE plots, heatmaps, per-airline bar charts, sentiment-evolution plots |
+| Pipeline consolidation | `presentation_1_pipelines_Aaditi`, `final_code_1_aaditi_macpro` | end-to-end pipeline scripts used for the final presentation/demo |
+
+`final_code_1_aaditi_macpro` is the most complete single branch — it contains
+the consolidated cleaning → MongoDB → sentiment → response-time pipeline used
+for the final demo.
+
+## Setup
+
+Requires a local or remote MongoDB instance. Scripts expect a database
+matching the naming used in `mongodb_insertion_tweetsusers_macpro`
+(`final_db_macpro_3`) — update the connection string/DB name at the top of
+each script if yours differs.
+
+```bash
+pip install pymongo pandas matplotlib seaborn vaderSentiment transformers datasets scikit-learn torch
 ```
-cd existing_repo
-git remote add origin https://gitlab.com/dbl-group/DBL.git
-git branch -M main
-git push -uf origin main
-```
 
-## Integrate with your tools
+## Contributors
 
-- [ ] [Set up project integrations](https://gitlab.com/dbl-group/DBL/-/settings/integrations)
-
-## Collaborate with your team
-
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
-
-## Test and Deploy
-
-Use the built-in continuous integration in GitLab.
-
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
-
-***
-
-# Editing this README
-
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
-
-## Suggestions for a good README
-
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
-
-## Name
-Choose a self-explaining name for your project.
-
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
-
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
-
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
-
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
-
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
-
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
-
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
-
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
-
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
-
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
-
-## License
-For open source projects, say how it is licensed.
-
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+Built as part of TU/e's DBL Data Challenge. Aaditi Malhan led the MongoDB
+pipeline, data cleaning, sentiment analysis (both VADER and the
+transformer-based evaluation), response-time analytics, and the majority of
+the visualizations.
