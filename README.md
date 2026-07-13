@@ -61,7 +61,4 @@ pip install pymongo pandas matplotlib seaborn vaderSentiment transformers datase
 
 ## Contributors
 
-Built as part of TU/e's DBL Data Challenge. Aaditi Malhan led the MongoDB
-pipeline, data cleaning, sentiment analysis (both VADER and the
-transformer-based evaluation), response-time analytics, and the majority of
-the visualizations.
+Built as part of TU/e's DBL Data Challenge.
